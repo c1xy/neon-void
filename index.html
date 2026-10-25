@@ -62,6 +62,7 @@ const G = {
   mode: 'classic', won: false, brush: 0, brushCd: 0, waveKind: 'n', pendingWave: 0,
   muts: [], scoreMul: 1,
   ach: [], achPop: null, grazes: 0, thornKills: 0, bombsUsed: 0, dailyRank: 0, daily: null,
+  gp: 0, errStreak: 0,
   rt: 0, newBest: false, bests: null, achRun: [], pStreak: 0,
   ultra: 0, sgT: 0, sgX: 0, sgY: 0, sgKills: 0, ultraCasts: 0, rank: 'D',
   mutE: [], evoN: 0, thornQ: null, shRe: 0,
@@ -214,6 +215,32 @@ const CFGS = [
   { k: 'scan',  n: 'CRT 扫描线', o: ['开', '关'] }
 ];
 function saveCfg() { try { localStorage.setItem('neonvoid_cfg', JSON.stringify(CFG)); } catch (e) {} }
+const GUIDE = [
+  { t: '玩法指南', lines: [
+    '击败敌人拾取经验水晶，升级时三选一强化（按 1/2/3 或点击，R 键可重抽）',
+    '连续击杀提升得分倍率，受伤清零；贴身擦过敌弹额外加分并充能奇点',
+    '每 5 波出现 BOSS，半血进入狂暴二阶段；第 3/6 波有陨石风暴/精英突击事件',
+    '敌人掉落：T 三重火力 · R 极速射击 · S 能量护盾 · B 炸弹 · H 回复生命',
+    '六种模式：经典 15 波通关 · 无尽深渊 · BOSS 连战 · 混沌/每日词条 · 对抗对决',
+    '混沌与每日模式击杀 BOSS 可进化词条；结算按 C 复制战报 · T 返回主界面'
+  ] },
+  { t: '操作指南', lines: [
+    'P1：WASD 移动 · 鼠标瞄准开火 · 左 Shift 冲刺 · 空格 炸弹 · Q / E / X 释放技能',
+    'P2（双人合作）：方向键移动 · 自动瞄准开火 · 右 Shift 冲刺',
+    'P2（对抗对决）：方向键驾驶 BOSS · 数字键 1-7 手动释放 BOSS 招式',
+    '通用热键：P 暂停 · M 静音 · F 全屏 · 波间/暂停/结算时按 T 返回主界面',
+    '设置面板开启「波间暂停」后，每波结束会停下来，Enter 确认继续下一波',
+    '触屏设备：左半屏虚拟摇杆移动 · 右侧技能按钮 · 自动瞄准，随时可玩'
+  ] },
+  { t: '技能指南', lines: [
+    'Q 时间裂缝：全场敌人减速 65%，持续 3.5 秒 · 冷却 25 秒',
+    'E 超载：子弹伤害 +1、射速移速大幅提升，持续 5 秒 · 冷却 30 秒',
+    'X 奇点：能量满 100 释放黑洞——螺旋吸入敌人与弹幕，3 秒后坍缩爆发清场',
+    '奇点充能：击杀 +2 · 擦弹 +3 · 受击 +15 · 命中 BOSS +0.3',
+    '空格 炸弹：清除全屏敌弹并重创所有敌人 · Shift 冲刺：短暂无敌高速位移',
+    '终极连招提示：贴脸擦弹充能 → 奇点吸走弹幕 → 坍缩瞬间贴身输出'
+  ] }
+];
 function applyCfg() {
   if (master) master.gain.value = (CFG.mute || G.muted) ? 0 : 1;
   if (sgain) sgain.gain.value = [0, 0.35, 0.9][CFG.sfx] != null ? [0, 0.35, 0.9][CFG.sfx] : 0.9;
@@ -2838,6 +2865,21 @@ function drawOverlay() {
       txt('—— 成就殿堂 · TROPHY ROOM ——', cx, H * 0.425, 14, '#ffc233', 'center', 800);
       ctx.shadowBlur = 0;
       txt(G.ach.length + ' / ' + ACHV.length + ' 已解锁 · UNLOCKED', cx, H * 0.425 + 22, 11.5, 'rgba(255,225,150,.8)', 'center', 600, true);
+    } else if (G.tStage === 'guide') {
+      ctx.shadowColor = '#4de3ff'; ctx.shadowBlur = 16;
+      txt('—— 游戏指南 · GUIDE ——', cx, H * 0.075, 14, '#4de3ff', 'center', 800);
+      ctx.shadowBlur = 0;
+      const pg = GUIDE[G.gp] || GUIDE[0];
+      let gy = H * 0.225;
+      for (const ln2 of pg.lines) {
+        ctx.globalAlpha = 0.1;
+        ctx.fillStyle = '#4de3ff';
+        ctx.fillRect(cx - W * 0.41, gy - 11, W * 0.82, 22);
+        ctx.globalAlpha = 1;
+        wrapTxt(ln2, cx, gy, W * 0.78, 13.5, 'rgba(215,235,252,.92)');
+        gy += 34;
+      }
+      txt('按 1 / 2 / 3 切换章节 · ESC 返回 · 开局前随时查阅', cx, H * 0.90, 11, 'rgba(140,180,220,.6)', 'center', 600);
     } else if (G.tStage === 'set') {
       ctx.shadowColor = '#9fdcff'; ctx.shadowBlur = 16;
       txt('—— 系统设置 · SETTINGS ——', cx, H * 0.425, 14, '#9fdcff', 'center', 800);
@@ -2958,7 +3000,7 @@ function drawOverlay() {
       }
       }
     }
-    txt('P 暂停 · M 静音 · A 成就 · S 设置 · C 关于 · NEON VOID v1.0', cx, H - 14, 10, 'rgba(140,170,210,.4)', 'center', 500, true);
+    txt('P 暂停 · M 静音 · A 成就 · G 指南 · S 设置 · C 关于 · NEON VOID v1.0', cx, H - 14, 10, 'rgba(140,170,210,.4)', 'center', 500, true);
   } else if (G.state === 'levelup') {
     ctx.fillStyle = 'rgba(3,5,16,.8)';
     ctx.fillRect(0, 0, W, H);
@@ -3244,11 +3286,21 @@ function titleBtns() {
     }
     return out2;
   }
+  if (G.tStage === 'guide') {
+    const out2 = [{ x: W / 2 - 70, y: H - 38, w: 140, h: 26, act: 'back', l: 'ESC · 返回', c: '#7d95b8' }];
+    const tw = 108;
+    GUIDE.forEach((g2, i2) => {
+      out2.push({ x: W / 2 - (3 * tw + 16) / 2 + i2 * (tw + 8), y: H * 0.115, w: tw, h: 30,
+        act: 'gp:' + i2, l: g2.t, c: G.gp === i2 ? '#4de3ff' : '#5a7090' });
+    });
+    return out2;
+  }
   if (G.tStage === 'mode') {
     const bw = Math.min(300, (W - 56) / 2 - 4), bh = 48, gap = 8, y0 = H * 0.455;
     const chips = [
       { x: W - 130, y: 12, w: 118, h: 26, act: 'ach', l: '🏆 成就 ' + G.ach.length + '/' + ACHV.length, c: '#ffc233' },
-      { x: W - 130, y: 44, w: 118, h: 26, act: 'set', l: '⚙ 设置 SETTINGS', c: '#9fdcff' }
+      { x: W - 130, y: 44, w: 118, h: 26, act: 'guide', l: '📖 玩法指南 · G', c: '#4de3ff' },
+      { x: W - 130, y: 76, w: 118, h: 26, act: 'set', l: '⚙ 设置 SETTINGS', c: '#9fdcff' }
     ];
     return chips.concat(MODES.map((m, i) => {
       const col = i % 2, row = Math.floor(i / 2);
@@ -3269,6 +3321,8 @@ function titleAct(a) {
   if (a === 'ach') { G.tStage = 'ach'; uiClick(); return; }
   if (a === 'set') { G.tStage = 'set'; uiClick(); return; }
   if (a === 'credits') { G.tStage = 'credits'; uiClick(); return; }
+  if (a === 'guide') { G.tStage = 'guide'; uiClick(); return; }
+  if (a.slice(0, 3) === 'gp:') { G.gp = +a.slice(3); uiClick(); return; }
   if (a.slice(0, 4) === 'cfg:') {
     const p = a.split(':');
     CFG[p[1]] = +p[2];
@@ -3357,6 +3411,13 @@ function handleKey(code) {
       if (code === 'Backspace' || code === 'KeyC') { titleAct('back'); return; }
       return;
     }
+    if (G.tStage === 'guide') {
+      if (code === 'Digit1') { titleAct('gp:0'); return; }
+      if (code === 'Digit2') { titleAct('gp:1'); return; }
+      if (code === 'Digit3') { titleAct('gp:2'); return; }
+      if (code === 'Backspace' || code === 'KeyG') { titleAct('back'); return; }
+      return;
+    }
     if (G.tStage === 'mode') {
       if (code === 'Digit1') { titleAct('mode:classic'); return; }
       if (code === 'Digit2') { titleAct('mode:endless'); return; }
@@ -3365,6 +3426,7 @@ function handleKey(code) {
       if (code === 'Digit5') { titleAct('mode:daily'); return; }
       if (code === 'Digit6') { titleAct('mode:versus'); return; }
       if (code === 'KeyA') { titleAct('ach'); return; }
+      if (code === 'KeyG') { titleAct('guide'); return; }
       if (code === 'KeyS') { titleAct('set'); return; }
       if (code === 'KeyC') { titleAct('credits'); return; }
       if (code === 'Enter' || code === 'Space') { titleAct('mode:' + G.tSel); return; }
@@ -3514,17 +3576,35 @@ function frame(now) {
   if (G.state === 'levelup') G.cardT += RDT;
   G.time += RDT;
   if (G.state === 'playing') { G.rt += RDT; if (G.rt > 300) unlock('survivor'); }
-  if (G.hitstop > 0) { G.hitstop -= RDT; render(); return; }
-  if (G.slowT > 0) { G.slowT -= RDT; if (G.slowT <= 0) G.slow = 1; }
-  if (G.state === 'playing') update(RDT * G.slow);
-  else if (G.state !== 'paused' && G.state !== 'levelup') updateAmbient(RDT);
-  if (G.state === 'playing' && G.pending > 0) {
-    G.state = 'levelup';
-    rollCards();
-    sfxLevel();
-    G.flash = 0.35; G.chroma = Math.max(G.chroma, 0.7);
+  try {
+    if (G.hitstop > 0) { G.hitstop -= RDT; render(); return; }
+    if (G.slowT > 0) { G.slowT -= RDT; if (G.slowT <= 0) G.slow = 1; }
+    if (G.state === 'playing') update(RDT * G.slow);
+    else if (G.state !== 'paused' && G.state !== 'levelup') updateAmbient(RDT);
+    if (G.state === 'playing' && G.pending > 0) {
+      G.state = 'levelup';
+      rollCards();
+      sfxLevel();
+      G.flash = 0.35; G.chroma = Math.max(G.chroma, 0.7);
+    }
+    render();
+    G.errStreak = 0;
+  } catch (e) {
+    // 自愈装甲：任何一帧出错都不冻结画面，连续出错则自动重置战场
+    G.errStreak++;
+    try { localStorage.setItem('nv_lasterr', String(e && e.message || e)); } catch (e2) {}
+    G.flash = Math.max(0, G.flash - 0.15);
+    G.shake = 0; G.chroma *= 0.85;
+    G.hitstop = 0; G.slow = 1; G.slowT = 0; G.sgT = 0; G.thornQ = null;
+    if (G.errStreak === 20) {
+      enemies.length = 0; ebullets.length = 0; mines.length = 0; marks.length = 0; G.boss = null; G.banner = null;
+      banner('已自动恢复', 'AUTO RECOVERED · 战场已重置，继续战斗');
+    }
+    if (G.errStreak > 60) { goTitle(); G.errStreak = 0; return; }
+    try { render(); } catch (e2) {
+      try { ctx.setTransform(DPR, 0, 0, DPR, 0, 0); ctx.fillStyle = '#05060f'; ctx.fillRect(0, 0, W, H); } catch (e3) {}
+    }
   }
-  render();
 }
 resize();
 if (typeof ResizeObserver !== 'undefined') new ResizeObserver(resize).observe(stage);
@@ -3533,6 +3613,7 @@ applyCfg();
 schedule();
 })();
 </script>
+
 
 
 
