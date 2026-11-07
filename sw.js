@@ -1,6 +1,8 @@
 /* NEON VOID · 霓虹虚空 — Service Worker（唯一的附加文件）
-   单文件游戏的离线缓存：stale-while-revalidate，hash 参数不影响命中（# 不发往网络） */
-const CACHE = 'neon-void-v2';
+   单文件游戏的离线缓存：stale-while-revalidate，hash 参数不影响命中（# 不发往网络）
+   [FIX-SW1] 每次发版必须递增 CACHE 版本号：activate 清掉旧缓存，已打开的旧标签页
+   下一次请求即换新版本，避免修复后的代码被旧缓存持续顶住（白屏旧案复发通道） */
+const CACHE = 'neon-void-v4'; // v1.3.0：擦弹专精 + 连战构建器（发版必递增）
 const CORE = ['./', './index.html'];
 
 self.addEventListener('install', (e) => {
@@ -28,10 +30,14 @@ self.addEventListener('fetch', (e) => {
       const net = fetch(e.request).then((res) => {
         if (res && res.ok) {
           const cp = res.clone();
-          caches.open(CACHE).then((c) => c.put(e.request, cp));
+          caches.open(CACHE).then((c) => c.put(e.request, cp)).catch(() => {}); // 配额满时不产生 unhandled rejection
         }
         return res;
-      }).catch(() => hit);
+      })
+        .catch(() => hit ||
+          // [FIX-SW1] 命中与直连都失败（install 期缓存被吞/配额清理）时降级回首页缓存，
+          // 离线首启不再落到浏览器错误页
+          caches.match('./', { ignoreSearch: true }).then((fb) => fb || Response.error()));
       return hit || net;
     })
   );
