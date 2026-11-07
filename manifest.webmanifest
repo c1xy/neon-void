@@ -1,0 +1,17 @@
+{
+  "name": "NEON VOID 霓虹虚空",
+  "short_name": "NEON VOID",
+  "description": "单文件霓虹太空竞技场射击游戏 · 零依赖",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#02030a",
+  "theme_color": "#05060f",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

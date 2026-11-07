@@ -10,7 +10,8 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="NEON VOID">
-<link rel="manifest" href="data:application/manifest+json;base64,eyJuYW1lIjoiTkVPTiBWT0lEIOmck+iZueiZmuepuiIsInNob3J0X25hbWUiOiJORU9OIFZPSUQiLCJkZXNjcmlwdGlvbiI6IuWNleaWh+S7tumck+iZueWkquepuuernuaKgOWcuuWwhOWHu+a4uOaIjyDCtyDpm7bkvp3otZYiLCJkaXNwbGF5IjoiZnVsbHNjcmVlbiIsIm9yaWVudGF0aW9uIjoibGFuZHNjYXBlIiwiYmFja2dyb3VuZF9jb2xvciI6IiMwMjAzMGEiLCJ0aGVtZV9jb2xvciI6IiMwNTA2MGYiLCJpY29ucyI6W3sic3JjIjoiZGF0YTppbWFnZS9zdmcreG1sLCUzQ3N2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMiclM0UlM0Nwb2x5Z29uIHBvaW50cz0nMTcsMyAyOSwyNyA1LDI3JyBmaWxsPSclMjMwMjA2MTQnIHN0cm9rZT0nJTIzNGRlM2ZmJyBzdHJva2Utd2lkdGg9JzInIHN0cm9rZS1saW5lam9pbj0ncm91bmQnLyUzRSUzQy9zdmclM0UiLCJzaXplcyI6ImFueSIsInR5cGUiOiJpbWFnZS9zdmcreG1sIiwicHVycG9zZSI6ImFueSJ9XX0=">
+<!-- [FIX-PWA1] manifest 原为 data: URL（opaque origin，Chromium 判定非同源不可安装）→ 落地为同源文件 -->
+<link rel="manifest" href="./manifest.webmanifest">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpolygon points='17,3 29,27 5,27' fill='none' stroke='%234de3ff' stroke-width='3' stroke-linejoin='round'/%3E%3C/svg%3E">
 <style>
 html,body{margin:0;padding:0;height:100%;background:radial-gradient(ellipse at 50% 40%,#060a18 0%,#02030a 70%);}
@@ -3863,15 +3864,25 @@ function drawOverlay() {
       ];
       // [FIX-COS6] 矮视口（手机横屏）关于页原样绘制会溢出屏幕底缘 → 缩字号/行距并跳过空行，桌面几何不变
       const cf = s2 => cC ? (s2 >= 20 ? 16 : s2 >= 14 ? 12 : s2 >= 12 ? 10.5 : 9.5) : s2;
-      let cyv = H * (cC ? 0.22 : 0.33);
+      // [FIX-COS7] 关于页与荣誉榜文字碰撞：荣誉榜/每日榜块（H>430 时从 H*0.80 起画到 +51）在关于页
+      // 仍然绘制，而正文按固定行距推进到 ~H*0.80、⚡ 固定画在 H*0.84 → 桌面 1280×800 上「感谢游玩」
+      // 压住荣誉榜标题、⚡ 压住榜单行。改为：正文终点让位榜单块顶（无榜时让位返回按钮），行距先收、
+      // 仍放不下再整体缩字号；⚡ 跟随正文流排版，不再固定 H*0.84。桌面 1280×800 与横屏 844×390 均不重叠。
+      const honTop = (H > 430 ? H * 0.80 : H - 64 - SAFE.b) - 14;
+      const cyTop = H * (cC ? 0.22 : 0.30);
+      const drawn = cC ? cl.filter(li => li[0]) : cl;
+      const sumF = drawn.reduce((a2, li) => a2 + cf(li[1]), 0);
+      const gap2 = CL((honTop - cyTop - sumF - 34) / drawn.length, 4, cC ? 6 : 13);
+      const k = Math.min(1, (honTop - cyTop) / (sumF + drawn.length * gap2 + 34));
+      let cyv = cyTop;
       for (const li of cl) {
         if (li[0] || !cC) {
-          if (li[0]) txt(li[0], cx, cyv, cf(li[1]), li[2], 'center', li[3]);
-          cyv += cf(li[1]) + (cC ? 6 : 13);
+          if (li[0]) txt(li[0], cx, cyv, cf(li[1]) * k, li[2], 'center', li[3]);
+          cyv += (cf(li[1]) + gap2) * k;
         }
       }
       const fl = 0.5 + 0.5 * Math.sin(G.time * 2);
-      txt('⚡', cx, H * 0.84, 20 + fl * 5, 'rgba(255,226,100,' + (0.45 + 0.5 * fl) + ')', 'center', 800);
+      txt('⚡', cx, cyv + 13 * k, (20 + fl * 5) * k, 'rgba(255,226,100,' + (0.45 + 0.5 * fl) + ')', 'center', 800);
     } else if (G.tStage === 'ghost') {
       const gh = G.ghost;
       ctx.shadowColor = '#8affd4'; ctx.shadowBlur = 16;
@@ -4406,6 +4417,11 @@ function titleBtns() {
   }
   if (G.tStage === 'ach' || G.tStage === 'set' || G.tStage === 'credits') {
     const out2 = [{ x: W / 2 - 70, y: H - 38 - SAFE.b, w: 140, h: 26, act: 'back', l: 'ESC · 返回', c: '#7d95b8' }];
+    if (G.tStage === 'credits') {
+      // [FIX-COS8] 关于页「反馈」入口：与设置/成就 chip 同一套点击实现（titleBtns 矩形命中 + titleAct），
+      // 放在「ESC · 返回」同行左侧，桌面鼠标与触屏 pointerdown 都可点，新标签打开 GitHub Issues
+      out2.push({ x: W / 2 - 70 - 158, y: H - 38 - SAFE.b, w: 150, h: 26, act: 'feedback', l: '💬 反馈 · GitHub Issues', c: '#4de3ff', f: 11 });
+    }
     if (G.tStage === 'set') {
       const setC2 = H < 560;
       const setY02 = setC2 ? H * 0.425 + 36 : H * 0.47;
@@ -4534,6 +4550,12 @@ function titleAct(a) {
   if (a === 'ach') { G.tStage = 'ach'; uiClick(); return; }
   if (a === 'set') { G.tStage = 'set'; uiClick(); return; }
   if (a === 'credits') { G.tStage = 'credits'; uiClick(); return; }
+  if (a === 'feedback') {
+    // [FIX-COS8] 反馈入口：GitHub Issues 新标签打开（noopener 断开 opener，防反向 tab 劫持）
+    uiClick();
+    try { window.open('https://github.com/c1xy/neon-void/issues', '_blank', 'noopener'); } catch (e) {}
+    return;
+  }
   if (a === 'guide') { G.tStage = 'guide'; uiClick(); return; }
   if (a.slice(0, 3) === 'gp:') { G.gp = +a.slice(3); uiClick(); return; }
   if (a.slice(0, 4) === 'cfg:') {
