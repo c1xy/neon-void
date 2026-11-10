@@ -10,8 +10,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="NEON VOID">
-<!-- [FIX-PWA1] manifest 原为 data: URL（opaque origin，Chromium 判定非同源不可安装）→ 落地为同源文件 -->
-<link rel="manifest" href="./manifest.webmanifest">
+<link rel="manifest" href="data:application/manifest+json;base64,eyJuYW1lIjoiTkVPTiBWT0lEIOmck+iZueiZmuepuiIsInNob3J0X25hbWUiOiJORU9OIFZPSUQiLCJkZXNjcmlwdGlvbiI6IuWNleaWh+S7tumck+iZueWkquepuuernuaKgOWcuuWwhOWHu+a4uOaIjyDCtyDpm7bkvp3otZYiLCJkaXNwbGF5IjoiZnVsbHNjcmVlbiIsIm9yaWVudGF0aW9uIjoibGFuZHNjYXBlIiwiYmFja2dyb3VuZF9jb2xvciI6IiMwMjAzMGEiLCJ0aGVtZV9jb2xvciI6IiMwNTA2MGYiLCJpY29ucyI6W3sic3JjIjoiZGF0YTppbWFnZS9zdmcreG1sLCUzQ3N2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMiclM0UlM0Nwb2x5Z29uIHBvaW50cz0nMTcsMyAyOSwyNyA1LDI3JyBmaWxsPSclMjMwMjA2MTQnIHN0cm9rZT0nJTIzNGRlM2ZmJyBzdHJva2Utd2lkdGg9JzInIHN0cm9rZS1saW5lam9pbj0ncm91bmQnLyUzRSUzQy9zdmclM0UiLCJzaXplcyI6ImFueSIsInR5cGUiOiJpbWFnZS9zdmcreG1sIiwicHVycG9zZSI6ImFueSJ9XX0=">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpolygon points='17,3 29,27 5,27' fill='none' stroke='%234de3ff' stroke-width='3' stroke-linejoin='round'/%3E%3C/svg%3E">
 <style>
 html,body{margin:0;padding:0;height:100%;background:radial-gradient(ellipse at 50% 40%,#060a18 0%,#02030a 70%);}
@@ -89,7 +88,8 @@ const G = {
   rerolls: 2, touchMode: false, coop: false, q: 2, ftEma: 16, qT: 0, lastMouse: -99,
   mode: 'classic', won: false, brush: 0, brushCd: 0, waveKind: 'n', pendingWave: 0,
   muts: [], scoreMul: 1,
-  ach: [], achPop: null, grazes: 0, thornKills: 0, bombsUsed: 0, dailyRank: 0, daily: null,
+  ach: [], achPop: null, grazes: 0, thornKills: 0, bombsUsed: 0, dailyRank: 0, daily: null, dstat: null,
+  tier: 0, tLow: 0, tHigh: 0, qToast: null,
   gp: 0, errStreak: 0,
   rt: 0, newBest: false, bests: null, achRun: [], pStreak: 0,
   ultra: 0, sgT: 0, sgX: 0, sgY: 0, sgKills: 0, ultraCasts: 0, rank: 'D',
@@ -133,7 +133,7 @@ const MODES = [
   { k: 'endless', n: '无尽深渊', en: 'ENDLESS', d: '永无止境 · 难度持续攀升', c: '#b46bff', key: '2' },
   { k: 'boss',    n: 'BOSS 连战', en: 'BOSS RUSH', d: '6 场核心恶战 · 终局奇点之瞳', c: '#ff5e5e', key: '3' },
   { k: 'chaos',   n: '混沌挑战', en: 'CHAOS', d: '随机 3 词条 · 得分×2 · 无尽', c: '#ffe233', key: '4' },
-  { k: 'daily',   n: '每日挑战', en: 'DAILY', d: '每日同卷 · 全员同词条 · ×2', c: '#3dff9e', key: '5' },
+  { k: 'daily',   n: '📅 每日挑战', en: 'DAILY', d: '每日同卷 · 全员同词条 · ×2 · 记连续天数', c: '#3dff9e', key: '5' },
   { k: 'versus',  n: '对抗对决', en: 'VERSUS', d: 'P2 操控 BOSS · 1v1 决斗', c: '#ff2e7e', key: '6' },
   { k: 'graze',   n: '擦弹专精', en: 'GRAZE RUN', d: '开火封印 · 擦弹即得分 · 无尽', c: '#eaff6a', key: '7' }
 ];
@@ -186,16 +186,28 @@ function loadLB() {
   } catch (e) { G.lb = []; }
 }
 loadLB();
-const ORIG_RANDOM = Math.random;
-function mulberry32(a) {
-  return function () {
-    a |= 0; a = a + 0x6D2B79F5 | 0;
-    let t = Math.imul(a ^ a >>> 15, 1 | a);
-    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
-    return ((t ^ t >>> 14) >>> 0) / 4294967296;
-  };
+/* [DAILY1] 随机数收口：玩法随机（波次构成/敌人类型/落点/掉落/暴击/升级三选一/词条/BOSS 弹幕）
+   全部走可播种流 RSTATE（mulberry32 算法原地推进），表现随机（粒子/音效/震屏/标题氛围）保留
+   Math.random —— 表现层每帧消耗量随帧率浮动，混进玩法流会破坏「同日同卷」的逐帧一致性。
+   每日模式开局以本地日期哈希播种 → 同一天所有玩家同布局；其他模式开局以运行时熵播种 → 手感不变。 */
+let RSTATE = (Math.random() * 4294967296) >>> 0;
+function srand(s) { RSTATE = s >>> 0; }
+function rnd() {
+  RSTATE = RSTATE + 0x6D2B79F5 | 0;
+  let t = Math.imul(RSTATE ^ RSTATE >>> 15, 1 | RSTATE);
+  t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+  return ((t ^ t >>> 14) >>> 0) / 4294967296;
 }
-function dailySeed() { const d = new Date(); return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate(); }
+const RG  = (a, b) => a + rnd() * (b - a);
+const RGI = (a, b) => Math.floor(RG(a, b + 1));
+function dailySeed() {
+  const d = new Date();
+  let h = (d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate()) >>> 0;
+  // [DAILY1] 日期（如 20261108）先过 32 位混合哈希再播种，相邻日期的卷面不线性相关
+  h = Math.imul(h ^ h >>> 16, 0x45d9f3b) >>> 0;
+  h = Math.imul(h ^ h >>> 16, 0x45d9f3b) >>> 0;
+  return (h ^ h >>> 16) >>> 0;
+}
 function hasMut(k) { return G.muts.indexOf(k) >= 0; }
 function addScore(n) { G.score += n * G.scoreMul; if (G.score >= 50000) unlock('score50k'); if (G.mode === 'graze' && G.score >= 20000) unlock('graze20k'); }
 const ACHV = [
@@ -212,6 +224,8 @@ const ACHV = [
   { k: 'lv10',     n: '火力全开', d: '单局升到 10 级', c: '#3dff9e' },
   { k: 'score50k', n: '得分机器', d: '单局得分 50000+', c: '#ffc233' },
   { k: 'daily',    n: '每日打卡', d: '完成一次每日挑战', c: '#3dff9e' },
+  { k: 'dailybest', n: '初战告捷', d: '每日挑战刷新本机今日最佳', c: '#3dff9e' },
+  { k: 'daily7',   n: '七日之约', d: '连续 7 天完成每日挑战', c: '#ffc233' },
   { k: 'coop',     n: '双翼齐飞', d: '双人模式到达第 5 波', c: '#ff5ec4' },
   { k: 'thorn25',  n: '以牙还牙', d: '荆棘装甲反杀 25 个敌人', c: '#8aff4d' },
   { k: 'phantom',  n: '幻影猎手', d: '击败虚空幻影 BOSS', c: '#8affd4' },
@@ -251,6 +265,25 @@ function loadAch() {
     for (const r of G.daily.rows) { if (typeof r.w !== 'number' || !isFinite(r.w)) r.w = +r.w || 0; r.c = r.c ? 1 : 0; }
     if (G.daily.rows.length !== d0) { try { localStorage.setItem('neonvoid_daily', JSON.stringify(G.daily)); } catch (e2) {} }
   } catch (e) { G.daily = { date: dateStr(), rows: [] }; }
+  // [DAILY2] 本机每日留存：历史最佳 / 最长连击 / 连续挑战天数。坏档降级自愈同 [FIX-DATA1]：
+  // 任何字段形状不对就单独归零重写，绝不影响其他存档，更不允许抛错打断启动
+  G.dstat = sanitizeDstat(localStorage.getItem('neonvoid_dstat'));
+}
+function sanitizeDstat(raw) {
+  let ds = null;
+  try { ds = JSON.parse(raw || 'null'); } catch (e) { ds = null; }
+  if (!ds || typeof ds !== 'object' || Array.isArray(ds)) ds = {};
+  const today = dateStr();
+  const out = {
+    last: typeof ds.last === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(ds.last) ? ds.last : '',
+    streak: typeof ds.streak === 'number' && isFinite(ds.streak) && ds.streak > 0 ? Math.min(3660, Math.floor(ds.streak)) : 0,
+    best: (ds.best && typeof ds.best === 'object' && typeof ds.best.s === 'number' && isFinite(ds.best.s) && ds.best.s > 0)
+      ? { s: Math.floor(ds.best.s), w: typeof ds.best.w === 'number' && isFinite(ds.best.w) ? Math.max(0, Math.floor(ds.best.w)) : 0, c: typeof ds.best.c === 'number' && isFinite(ds.best.c) ? Math.max(0, Math.floor(ds.best.c)) : 0, t: +ds.best.t || 0 }
+      : { s: 0, w: 0, c: 0, t: 0 },
+    mcombo: typeof ds.mcombo === 'number' && isFinite(ds.mcombo) && ds.mcombo > 0 ? Math.floor(ds.mcombo) : 0
+  };
+  if (out.last && out.last !== today && !out.streak) out.last = ''; // streak 丢失时 last 也作废，避免跨天误续
+  return out;
 }
 loadAch();
 function unlock(k) {
@@ -286,7 +319,7 @@ const CFGS = [
   { k: 'wgate', n: '波间暂停', o: ['关', '开'] },
   { k: 'sfx',   n: '音效音量',  o: ['关', '低', '正常'] },
   { k: 'mus',   n: '音乐音量',  o: ['关', '低', '正常'] },
-  { k: 'fx',    n: '画面特效',  o: ['自动', '高', '流畅'] },
+  { k: 'fx',    n: '画质',      o: ['自动', '高', '低'] },
   { k: 'shake', n: '屏幕震动',  o: ['开', '关'] },
   { k: 'scan',  n: 'CRT 扫描线', o: ['开', '关'] }
 ];
@@ -299,7 +332,8 @@ const GUIDE = [
     '六大 BOSS 轮番镇守：奇点之瞳的新星爆发极难缠；无尽第 30 波起进入深渊回廊，敌潮全面升格',
     '敌人掉落：T 三重火力 · R 极速射击 · S 能量护盾 · B 炸弹 · H 回复生命',
     '七大模式：经典 15 波 · 无尽深渊 · BOSS 连战 · 混沌/每日词条 · 擦弹专精 · 对抗对决 · 残影悬赏',
-    '混沌与每日模式击杀 BOSS 可进化词条；结算按 C 复制战报 · T 返回主界面'
+    '混沌与每日模式击杀 BOSS 可进化词条；结算按 C 复制战报 · T 返回主界面',
+    '每日挑战（按 5）：同一天所有玩家同布局同词条；结算展示本机今日最佳与连续挑战天数'
   ] },
   { t: '操作指南', lines: [
     'P1：WASD 移动 · 鼠标瞄准开火 · 左 Shift 冲刺 · 空格 炸弹 · Q / E / X 释放技能',
@@ -325,14 +359,17 @@ const GUIDE = [
     'BOSS 波是限时弹幕袭扰：BOSS 免疫，撑过约 25 秒它自行撤离，无伤有成就',
     '连战构建器（主界面按 B）：点 BOSS 头像排 1-8 场出场序列，三档血量',
     '「复制分享链接」生成 #rush= 码；好友打开链接直接迎战你的自定义菜单',
-    '自定义连战的成绩进同一荣誉榜（标注「连战构建」），评级线与 BOSS 连战一致'
+    '自定义连战的成绩进同一荣誉榜（标注「连战构建」），评级线与 BOSS 连战一致',
+    '每日挑战卷面按日期播种，荣誉榜行标注 DAILY、评级线独立；连续 7 天有「七日之约」成就'
   ] }
 ];
 function applyCfg() {
   if (master) master.gain.value = (CFG.mute || G.muted) ? 0 : 1;
   if (sgain) sgain.gain.value = [0, 0.35, 0.9][CFG.sfx] != null ? [0, 0.35, 0.9][CFG.sfx] : 0.9;
   if (mgain) mgain.gain.value = [0, 0.18, 0.5][CFG.mus] != null ? [0, 0.18, 0.5][CFG.mus] : 0.5;
-  if (CFG.fx === 1) G.q = 2;
+  // [PERF-L] 手动画质覆盖立即生效（设置页点击即反馈）；自动档由主循环治理器接管
+  if (CFG.fx === 1) setTier(0);
+  else if (CFG.fx === 2) setTier(2);
   const sc = root.querySelector('.nv-scan');
   if (sc) sc.style.display = CFG.scan ? '' : 'none';
 }
@@ -452,7 +489,9 @@ function postFX() {
   } catch (e) {}
 }
 function drawNebula() {
-  if (G.time - nebLast > 0.45) {
+  // [PERF-L] 星云减载：L1 重绘间隔 0.45s→1.6s；L2 背景静态化——停绘（保留 resize 后的第一帧），
+  // 亮度与滚动视差仍保留，只是不再每 0.45s 重算三张全屏径向渐变
+  if (nebLast < -8 || (G.tier < 2 && G.time - nebLast > (G.tier === 1 ? 1.6 : 0.45))) {
     nebLast = G.time;
     const nw = nebCv.width, nh = nebCv.height;
     nebCtx.setTransform(1, 0, 0, 1, 0, 0);
@@ -631,11 +670,28 @@ function pad2(t, semis) {
 
 /* ================= fx helpers ================= */
 function banner(m, s, c, small) { G.banner = { m, s, c: c || '#4de3ff', t: 0, d: small ? 1.5 : 2.3, small: !!small }; }
+/* [PERF-L] 画质档位：L0 全效 → L1 粒子减半+辉光/星云减载 → L2 弹幕上限 400→300+背景静态化。
+   只动表现层预算（粒子/辉光/星云/弹幕池上限），弹幕数据格式、战报、悬赏码完全不受档位影响。
+   自动档（CFG.fx=0）由主循环的 FPS 治理器驱动：<40fps 持续 10 秒降一档，≥55fps 持续 20 秒回升
+   一档（迟滞防抖：两阈值+两持时错开，不会在 40~55 间来回抖动）；「高」锁 L0，「低」锁 L2。 */
+function setTier(t, announce) {
+  t = CL(t, 0, 2);
+  if (t === G.tier) return;
+  G.tier = t;
+  G.q = [2, 1, 0][t];
+  G.tLow = 0; G.tHigh = 0;
+  EB_CAP = t >= 2 ? 300 : 400;
+  if (announce) {
+    G.qToast = { t: 0, msg: t === 0 ? '画质已回升 · L0 全效' : t === 1 ? '画质降档 · L1 省电（粒子减半）' : '画质降档 · L2 流畅（弹幕上限 300 · 背景静态化）' };
+  }
+}
+const PF = () => G.tier >= 1 ? 0.5 : 1; // [PERF-L] 表现层粒子生成概率倍率：L1/L2 减半
 function addText(x, y, t, c, size) {
   texts.push({ x, y, t, c, life: 1, size: size || 13 });
   if (texts.length > 28) texts.shift();
 }
 function boom(x, y, c, n, pow) {
+  if (G.tier >= 1) n = Math.max(2, n >> 1); // [PERF-L] L1/L2 爆炸粒子减半
   for (let i = 0; i < n; i++) {
     const a = R(0, TAU), sp = R(40, 250) * (pow / 6 + 0.5);
     parts.push({ type: Math.random() < 0.5 ? 0 : 1, x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
@@ -648,7 +704,7 @@ function boom(x, y, c, n, pow) {
   if (parts.length > PMAX()) parts.splice(0, parts.length - PMAX());
 }
 function sparkHit(x, y, c) {
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0, n = G.tier >= 1 ? 3 : 5; i < n; i++) { // [PERF-L] L1/L2 命中火花减载
     const a = R(0, TAU), sp = R(60, 220);
     parts.push({ type: 1, x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: R(0.12, 0.3), ml: 0.3, c, sz: 1.5, drag: 3 });
   }
@@ -694,7 +750,7 @@ function rollCards() {
   const pool = UPGRADES.filter(u => !(G.mode === 'graze' && GRAZE_NO[u.k]) && (G.up[u.k] || 0) < u.max);
   const picks = [];
   while (picks.length < 3 && pool.length) {
-    picks.push(pool.splice(RI(0, pool.length - 1), 1)[0]);
+    picks.push(pool.splice(RGI(0, pool.length - 1), 1)[0]);
   }
   if (!picks.length) {
     G.pending = 0; G.cards = []; G.state = 'playing';
@@ -763,24 +819,24 @@ function makeEnemy(k, x, y, elite) {
     hp: Math.max(1, Math.round(T.hp * (elite ? 2.5 : 1) * hm)),
     maxhp: Math.max(1, Math.round(T.hp * (elite ? 2.5 : 1) * hm)), c: T.c, sc: T.sc, elite: !!elite,
     sp,
-    rot: R(0, TAU), ph: R(0, TAU), fireT: R(1.2, 2.8), dir: Math.random() < 0.5 ? 1 : -1,
+    rot: RG(0, TAU), ph: RG(0, TAU), fireT: RG(1.2, 2.8), dir: rnd() < 0.5 ? 1 : -1,
     orb: Math.atan2(y - player.y, x - player.x), hitT: 0, shape: T.shape,
     // 擦弹专精：敌人是「掠过型」——出弹一阵后自行撤离（不计击杀不掉分），波次靠清场判定推进
-    grzLeave: G.mode === 'graze' && k !== 'meteor' ? 9 + R(0, 4) + Math.min(3, G.wave * 0.12) : null,
+    grzLeave: G.mode === 'graze' && k !== 'meteor' ? 9 + RG(0, 4) + Math.min(3, G.wave * 0.12) : null,
     // 擦弹专精：全敌型开火计时（原生只有狙击/布雷者会射击，擦弹模式给所有敌人补瞄准弹，保证 1 波起就有弹可擦）
-    grzFire: G.mode === 'graze' && k !== 'meteor' && k !== 'mini' ? R(1.2, 2.6) : null
+    grzFire: G.mode === 'graze' && k !== 'meteor' && k !== 'mini' ? RG(1.2, 2.6) : null
   };
 }
 function queueSpawn(item) {
   let k = item;
   if (item[0] === 'E') k = item.slice(1);
   let x, y;
-  const side = k === 'meteor' ? 0 : RI(0, 3);
-  if (side === 0) { x = R(40, W - 40); y = -28; }
-  else if (side === 1) { x = R(40, W - 40); y = H + 28; }
-  else if (side === 2) { x = -28; y = R(40, H - 40); }
-  else { x = W + 28; y = R(40, H - 40); }
-  const elite = item[0] !== 'E' && G.wave >= 7 && Math.random() < (0.09 + G.wave * 0.004) * (hasMut('elite2') ? (evo('elite2') ? 5 : 3) : 1);
+  const side = k === 'meteor' ? 0 : RGI(0, 3);
+  if (side === 0) { x = RG(40, W - 40); y = -28; }
+  else if (side === 1) { x = RG(40, W - 40); y = H + 28; }
+  else if (side === 2) { x = -28; y = RG(40, H - 40); }
+  else { x = W + 28; y = RG(40, H - 40); }
+  const elite = item[0] !== 'E' && G.wave >= 7 && rnd() < (0.09 + G.wave * 0.004) * (hasMut('elite2') ? (evo('elite2') ? 5 : 3) : 1);
   marks.push({ x, y, mx: CL(x, 26, W - 26), my: CL(y, 26, H - 26), t: 0.55, k, elite });
 }
 function spawnBoss(n, tier, idx, hpM2, lbl) {
@@ -852,7 +908,7 @@ function spawnGhostBoss() {
   G.boss.gCastCd = st.castCd;
   G.boss.gSpm = st.spm;
   G.boss.gMv = st.mv;
-  G.boss.gPh = R(0, TAU);
+  G.boss.gPh = RG(0, TAU);
   banner('⚔ 残影悬赏', 'GHOST ECHO · 血量 ' + st.hp + ' · 出招表 ' + G.boss.gDeck.length + ' 招 · 链#' + gh.chain, '#8affd4');
   sfxBoss(); G.shake = 8;
 }
@@ -897,7 +953,7 @@ function startWave(n) {
     const q = [];
     let guard = 0;
     while (budget > 0 && guard++ < 200) {
-      let k = pool[RI(0, pool.length - 1)];
+      let k = pool[RGI(0, pool.length - 1)];
       if (ETYPES[k].cost * 1.6 > budget) k = 'chaser';
       q.push('E' + k); budget -= ETYPES[k].cost * 1.6;
     }
@@ -913,7 +969,7 @@ function startWave(n) {
     const q = [];
     let guard = 0;
     while (budget > 0 && guard++ < 200) {
-      let k = pool[RI(0, pool.length - 1)];
+      let k = pool[RGI(0, pool.length - 1)];
       if (ETYPES[k].cost > budget) k = 'chaser';
       q.push(k); budget -= ETYPES[k].cost;
     }
@@ -999,7 +1055,10 @@ function startGame(gmode, pmode) {
   G.rushRun = gmode === 'brb'
     ? (G.rush && G.rush.order && G.rush.order.length ? G.rush : { order: [0, 1, 2, 3, 4, 5], tier: 0 })
     : null;
-  Math.random = gmode === 'daily' ? mulberry32(dailySeed()) : ORIG_RANDOM;
+  // [DAILY1] 开局播种：每日=本地日期哈希（同一天全员同卷）；其他模式=运行时熵（体感与纯随机一致）。
+  // 玩法随机一律走 RSTATE 流；不再整体替换 Math.random（表现层随机与其解耦，见 DAILY1 注释块）。
+  if (gmode === 'daily') srand(dailySeed());
+  else srand((((Math.random() * 4294967296) >>> 0) ^ (Date.now() & 0x7fffffff) ^ (performance.now() * 1000 & 0x7fffffff)) >>> 0);
   player.x = W / 2 - (G.coop ? 90 : 0); player.y = H * 0.62; player.vx = 0; player.vy = 0;
   player.spawnT = 0.5;
   parts.push({ type: 2, x: player.x, y: player.y, vx: 0, vy: 0, rad: 4, vr: 620, life: 0.5, ml: 0.5, c: '#4de3ff', sz: 2.5, drag: 0 });
@@ -1024,7 +1083,7 @@ function startGame(gmode, pmode) {
   }
   if (G.mode === 'chaos' || G.mode === 'daily') {
     const pool2 = MUTATORS.map(m => m.k);
-    for (let i = 0; i < 3; i++) G.muts.push(pool2.splice(Math.floor(Math.random() * pool2.length), 1)[0]);
+    for (let i = 0; i < 3; i++) G.muts.push(pool2.splice(Math.floor(rnd() * pool2.length), 1)[0]);
     G.scoreMul = 2;
     if (hasMut('mag2')) G.magnet *= 2.2;
     if (hasMut('big')) G.pierce += 1;
@@ -1046,7 +1105,6 @@ function setPause(p) {
   }
 }
 function goTitle() {
-  Math.random = ORIG_RANDOM;
   enemies.length = 0; bullets.length = 0; ebullets.length = 0;
   mines.length = 0; marks.length = 0; orbs.length = 0; ghosts.length = 0;
   parts.length = 0; texts.length = 0; pickups.length = 0; // [FIX-9] 残留脏粒子会让渲染持续抛异常
@@ -1074,7 +1132,6 @@ function gameOver() {
   for (const b of ebullets) sparkHit(b.x, b.y, '#ff5577');
   ebullets.length = 0;
   sfxOver();
-  Math.random = ORIG_RANDOM;
   recordScore();
 }
 function recordScore() {
@@ -1102,15 +1159,32 @@ function recordScore() {
     const rk2 = db.rows.indexOf(rec2);
     G.dailyRank = rk2 >= 0 ? rk2 + 1 : 0;
     try { localStorage.setItem('neonvoid_daily', JSON.stringify(db)); } catch (e) {}
+    // [DAILY2] 连续挑战天数：last=今天 → 不动；last=昨天 → +1；否则从 1 重新起算（同日多局只计一次）
+    const ds = sanitizeDstat(JSON.stringify(G.dstat || {}));
+    const today = dateStr();
+    if (ds.last !== today) {
+      const yd = new Date(); yd.setDate(yd.getDate() - 1);
+      const ys = yd.getFullYear() + '-' + pad(yd.getMonth() + 1, 2) + '-' + pad(yd.getDate(), 2);
+      ds.streak = ds.last === ys ? ds.streak + 1 : 1;
+      ds.last = today;
+    } else if (ds.streak <= 0) ds.streak = 1;
+    if (rec2.s > ds.best.s) ds.best = { s: rec2.s, w: G.wave, c: G.maxCombo, t: rec2.t };
+    if (G.maxCombo > ds.mcombo) ds.mcombo = G.maxCombo;
+    G.dstat = ds;
+    try { localStorage.setItem('neonvoid_dstat', JSON.stringify(ds)); } catch (e) {}
+    if (ds.streak >= 7) unlock('daily7');
+    if (rk2 === 0 && rec2.s > 0) unlock('dailybest'); // 初战告捷：刷新本机今日最佳
   }
 }
 const RK = { S: '#ffc233', A: '#3dff9e', B: '#4de3ff', C: '#b46bff', D: '#8fa6c8' };
 const RN = { S: '传说 · LEGEND', A: '宗师 · MASTER', B: '精英 · ELITE', C: '行者 · RUNNER', D: '新兵 · ROOKIE' };
 function calcRank() {
   // 各形态计分尺度不同（擦弹=贴脸生存、构建器=纯 BOSS 战），评级线分开标定，避免跨形态失真
+  // [DAILY2] 每日挑战保底 ×2 分且词条加成，评级线独立标定，不与无尽/混沌共用，避免跨形态比较失真
   const bars = (G.mode === 'boss' || G.mode === 'brb') ? [25000, 16000, 10000, 5000]
     : G.mode === 'graze' ? [45000, 28000, 16000, 7000]
     : G.mode === 'versus' || G.mode === 'ghost' ? [8000, 5000, 3000, 1500]
+    : G.mode === 'daily' ? [70000, 46000, 28000, 13000]
     : (G.mode === 'classic' ? [30000, 20000, 12000, 6000] : [60000, 40000, 25000, 12000]);
   let r = 'D';
   if (G.score >= bars[3]) r = 'C';
@@ -1135,6 +1209,12 @@ function battleReport() {
   ls.push('WAVE ' + G.wave + ' · LV ' + G.level + ' · 击杀 ' + G.kills + ' · 最大连击 ×' + G.maxCombo +
     ' · 命中率 ' + (G.shots ? Math.round(G.hits / G.shots * 100) : 0) + '%');
   if (G.mode === 'graze') ls.push('擦弹 ' + G.grazes + ' 次 · 本波擦弹 ' + (G.waveGrz || 0));
+  if (G.mode === 'daily') {
+    // [DAILY2] 战报带本机留存：今日最佳 / 连续天数（同日多局取榜首）
+    const tb = G.daily && G.daily.rows.length ? G.daily.rows[0].s : 0;
+    const stk = G.dstat && G.dstat.streak > 0 ? G.dstat.streak : 0;
+    ls.push('本机今日最佳 ' + pad(tb, 7) + (stk > 0 ? ' · 连续挑战 ' + stk + ' 天' : ''));
+  }
   if (G.mode === 'classic' || G.mode === 'boss') {
     let t2 = '⏱ 用时 ' + fmtTime(G.rt);
     if (G.newBest) t2 += ' (最速纪录!)';
@@ -1380,7 +1460,14 @@ function ghostDeck(gh) {
   }
   if (!deck.length) deck.push('radial', 'spiral', 'aimed');
   const seed = ((gh.score * 2654435761) ^ (gh.wave * 97) ^ (gh.chain * 131) ^ 0x9E3779B9) >>> 0;
-  const rnd = mulberry32(seed);
+  // [DAILY1] 悬赏码出招表洗牌用独立 mulberry32 闭包（输出序列与旧版逐位一致，与玩法 RNG 流解耦）
+  let sa = seed >>> 0;
+  const rnd = () => {
+    sa = sa + 0x6D2B79F5 | 0;
+    let t = Math.imul(sa ^ sa >>> 15, 1 | sa);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
   for (let i = deck.length - 1; i > 0; i--) {
     const j = Math.floor(rnd() * (i + 1));
     const t = deck[i]; deck[i] = deck[j]; deck[j] = t;
@@ -1569,7 +1656,6 @@ function overAct(k) {
 function winGame() {
   G.state = 'over'; G.over = 0; G.won = true;
   G.endSnap = snapStage(); // 海报底图：胜利瞬间帧
-  Math.random = ORIG_RANDOM;
   G.flash = 0.85; G.chroma = 1; G.shake = 12;
   G.cleared = true; G.inter = 999;
   slowmo(0.3, 1.2);
@@ -1601,7 +1687,7 @@ function fireBullet(fp) {
   for (let i = 0; i < n; i++) {
     if (bullets.length >= BUL_MAX) break; // [FIX-CAP1] 触顶丢弃新弹，不污染命中率统计
     const ang = a - spread / 2 + i * 0.14;
-    const crit = Math.random() < G.critC;
+    const crit = rnd() < G.critC;
     let dmg = G.dmg + (G.odT > 0 ? 1 : 0);
     if (hasMut('glass')) dmg *= evo('glass') ? 3 : 2;
     if (crit) dmg *= 2;
@@ -1617,10 +1703,11 @@ function fireBullet(fp) {
 /* [FIX-CAP1] 弹幕硬上限：无尽 30+ 波/对抗连招叠加时 ebullets 稳态可达数百发（mirror bo=2 反弹
    + 11s 寿命 ≈ 稳态 220 发，多招叠加更多），低端机每帧实体×距离判定+绘制会把渲染进程顶到
    OOM。触顶时丢弃最旧弹保新弹幕（新弹幕才构成即时威胁）；bo 反弹弹单独给更短寿命，
-   镜面折返弹不再整局滞留。eb() 从不在 ebullets 遍历中被调用，shift 安全。 */
-const EBU_MAX = 400;
+   镜面折返弹不再整局滞留。eb() 从不在 ebullets 遍历中被调用，shift 安全。
+   [PERF-L] L2 档把上限降到 300（整体遍历/碰撞/绘制成本近似线性于弹数），L0/L1 维持 400 不变。 */
+let EB_CAP = 400;
 function eb(x, y, a, sp, r, c, bo) {
-  if (ebullets.length >= EBU_MAX) ebullets.shift();
+  if (ebullets.length >= EB_CAP) ebullets.shift();
   ebullets.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, r: r || 5, c: c || '#ff5577', life: bo ? 6.5 : 11, bo: bo || 0 });
 }
 function milestones() {
@@ -1637,18 +1724,18 @@ function milestones() {
 function drops(e) {
   // 生命恢复：独立掉落判定，残血时概率大增，精英几乎必掉
   const hc = ((G.lives <= 2 ? 0.065 : 0.022) + (e.elite ? 0.16 : e.t === 'meteor' ? 0.04 : 0)) * (hasMut('rich') ? 3 : 1);
-  if (G.lives < 9 && Math.random() < hc) {
-    pickups.push({ x: e.x, y: e.y, vx: R(-50, 50), vy: R(-50, 50), k: 'H', life: 11, t: 0 });
+  if (G.lives < 9 && rnd() < hc) {
+    pickups.push({ x: e.x, y: e.y, vx: RG(-50, 50), vy: RG(-50, 50), k: 'H', life: 11, t: 0 });
   }
   let chance = e.elite ? (hasMut('elite2') ? 1 : 0.85) : e.t === 'meteor' ? 0.3 : 0.09;
   if (hasMut('rich')) chance = Math.min(0.95, chance * 3);
-  if (Math.random() > chance) return;
+  if (rnd() > chance) return;
   const table = [['T', 26], ['R', 26], ['S', 20], ['B', 18]];
   let total = 0; for (const t of table) total += t[1];
-  let roll = Math.random() * total, k = 'T';
+  let roll = rnd() * total, k = 'T';
   for (const t of table) { roll -= t[1]; if (roll <= 0) { k = t[0]; break; } }
-  pickups.push({ x: e.x, y: e.y, vx: R(-50, 50), vy: R(-50, 50), k, life: 11, t: 0 });
-  if (e.elite && evo('elite2')) pickups.push({ x: e.x + 14, y: e.y + 10, vx: R(-50, 50), vy: R(-50, 50), k, life: 11, t: 0 });
+  pickups.push({ x: e.x, y: e.y, vx: RG(-50, 50), vy: RG(-50, 50), k, life: 11, t: 0 });
+  if (e.elite && evo('elite2')) pickups.push({ x: e.x + 14, y: e.y + 10, vx: RG(-50, 50), vy: RG(-50, 50), k, life: 11, t: 0 });
 }
 function killEnemy(j) {
   const e = enemies[j];
@@ -1676,7 +1763,7 @@ function killEnemy(j) {
   let orbN = e.elite ? Math.round(ETYPES[e.t].xp * 2.5) : ETYPES[e.t].xp;
   if (hasMut('swift')) orbN *= evo('swift') ? 4 : 2;
   for (let i = 0; i < orbN; i++) {
-    const oa = R(0, TAU), osp = R(30, 160);
+    const oa = RG(0, TAU), osp = RG(30, 160);
     orbs.push({ x: e.x, y: e.y, vx: Math.cos(oa) * osp, vy: Math.sin(oa) * osp, t: 0, life: 12 });
   }
   G.hitstop = Math.max(G.hitstop, e.elite ? 0.045 : 0.015);
@@ -1684,16 +1771,16 @@ function killEnemy(j) {
   milestones();
   if (e.t === 'splitter') {
     for (let i = 0; i < 3; i++) {
-      const a = R(0, TAU);
+      const a = RG(0, TAU);
       const m = makeEnemy('mini', e.x, e.y, false);
       m.vx = Math.cos(a) * 220; m.vy = Math.sin(a) * 220;
       enemies.push(m);
     }
   }
-  if (hasMut('swarm') && e.t !== 'mini' && Math.random() < (evo('swarm') ? 0.35 : 0.22)) {
+  if (hasMut('swarm') && e.t !== 'mini' && rnd() < (evo('swarm') ? 0.35 : 0.22)) {
     const cnt = evo('swarm') ? 3 : 2;
     for (let i = 0; i < cnt; i++) {
-      const a = R(0, TAU);
+      const a = RG(0, TAU);
       const m = makeEnemy('mini', e.x, e.y, false);
       m.vx = Math.cos(a) * 200; m.vy = Math.sin(a) * 200;
       enemies.push(m);
@@ -1757,16 +1844,16 @@ function finishBoss(b) {
   addScore(pts);
   banner('核心摧毁', 'CORE DESTROYED · +' + pts, '#ffc233');
   const ks = ['T', 'R', 'B', 'H'];
-  for (let i = 0; i < 4; i++) pickups.push({ x: b.x + R(-40, 40), y: b.y + R(-30, 30), vx: R(-60, 60), vy: R(-60, 60), k: ks[i], life: 12, t: 0 });
+  for (let i = 0; i < 4; i++) pickups.push({ x: b.x + RG(-40, 40), y: b.y + RG(-30, 30), vx: RG(-60, 60), vy: RG(-60, 60), k: ks[i], life: 12, t: 0 });
   for (let i = 0; i < 30; i++) {
-    const oa = R(0, TAU), osp = R(60, 320);
+    const oa = RG(0, TAU), osp = RG(60, 320);
     orbs.push({ x: b.x, y: b.y, vx: Math.cos(oa) * osp, vy: Math.sin(oa) * osp, t: 0, life: 14 });
   }
   sfxBomb();
   if ((G.mode === 'chaos' || G.mode === 'daily') && G.muts.length) {
     const cand = G.muts.filter(k2 => G.mutE.indexOf(k2) < 0);
     if (cand.length) {
-      const k2 = cand[Math.floor(Math.random() * cand.length)];
+      const k2 = cand[Math.floor(rnd() * cand.length)];
       G.mutE.push(k2);
       G.evoN++;
       if (G.evoN >= 3) unlock('evo3');
@@ -1998,7 +2085,7 @@ function updPlayer(dt) {
     else { player.fireT = 1 / rate; fireBullet(player); }
   }
   const spd = Math.sqrt(player.vx * player.vx + player.vy * player.vy);
-  if (spd > 60 && Math.random() < 0.8) {
+  if (spd > 60 && Math.random() < 0.8 * PF()) {
     const ba = Math.atan2(player.vy, player.vx) + Math.PI + R(-0.3, 0.3);
     parts.push({ type: 0, x: player.x + Math.cos(ba) * 13, y: player.y + Math.sin(ba) * 13,
       vx: Math.cos(ba) * R(30, 90), vy: Math.sin(ba) * R(30, 90), life: R(0.15, 0.3), ml: 0.3,
@@ -2047,7 +2134,7 @@ function updPlayer2(dt) {
     if (G.mode === 'graze') player2.fireT = 0.2;
     else { player2.fireT = 1 / rate; fireBullet(player2); }
   }
-  if (spdNow > 60 && Math.random() < 0.8) {
+  if (spdNow > 60 && Math.random() < 0.8 * PF()) {
     const ba = Math.atan2(player2.vy, player2.vx) + Math.PI + R(-0.3, 0.3);
     parts.push({ type: 0, x: player2.x + Math.cos(ba) * 13, y: player2.y + Math.sin(ba) * 13,
       vx: Math.cos(ba) * R(30, 90), vy: Math.sin(ba) * R(30, 90), life: R(0.15, 0.3), ml: 0.3,
@@ -2069,7 +2156,7 @@ function updEnemies(dt) {
       e.grzLeave -= dt;
       if (e.grzLeave <= 0) {
         e.flee = true;
-        e.fleA = Math.atan2(e.y - player.y, e.x - player.x) + R(-0.5, 0.5);
+        e.fleA = Math.atan2(e.y - player.y, e.x - player.x) + RG(-0.5, 0.5);
         e.fireT = 99; // 停火
         addText(e.x, e.y - e.r - 8, '撤离', e.c, 10);
       }
@@ -2101,7 +2188,7 @@ function updEnemies(dt) {
       e.rot += 1.2 * dt;
       e.fireT -= dt;
       if (e.fireT <= 0 && d < 560) {
-        e.fireT = 2.4 + R(0, 0.7);
+        e.fireT = 2.4 + RG(0, 0.7);
         eb(e.x, e.y, Math.atan2(dy, dx), 255, 5, '#ff6a3c');
         tone('square', 340, 180, 0.1, 0.05);
       }
@@ -2113,7 +2200,7 @@ function updEnemies(dt) {
       e.rot += 0.6 * dt;
       e.fireT -= dt;
       if (e.fireT <= 0 && mines.length < 10) {
-        e.fireT = 2.8 + R(0, 0.8);
+        e.fireT = 2.8 + RG(0, 0.8);
         mines.push({ x: e.x, y: e.y, t: 0, life: 7, r: 9 });
         tone('square', 240, 160, 0.12, 0.05);
       }
@@ -2126,7 +2213,7 @@ function updEnemies(dt) {
       e.rot += 2.6 * dt;
     } else if (e.t === 'meteor') {
       e.rot += 1.6 * dt;
-      if (Math.random() < dt * 20) parts.push({ type: 0, x: e.x + R(-e.r * 0.4, e.r * 0.4), y: e.y + R(-e.r * 0.4, e.r * 0.4),
+      if (Math.random() < dt * 20 * PF()) parts.push({ type: 0, x: e.x + R(-e.r * 0.4, e.r * 0.4), y: e.y + R(-e.r * 0.4, e.r * 0.4),
         vx: R(-24, 24), vy: R(-24, 24), life: R(0.2, 0.5), ml: 0.5, c: Math.random() < 0.5 ? '#ff9a3c' : '#ffd27a', sz: R(1.4, 2.8), drag: 2 });
     }
     e.x += e.vx * dt; e.y += e.vy * dt;
@@ -2141,7 +2228,7 @@ function updEnemies(dt) {
       if (e.grzFire != null && G.state === 'playing' && e.x > -20 && e.x < W + 20 && e.y > -20 && e.y < H + 20) {
         e.grzFire -= dt;
         if (e.grzFire <= 0) {
-          e.grzFire = 2.0 + R(0, 1.4);
+          e.grzFire = 2.0 + RG(0, 1.4);
           eb(e.x, e.y, Math.atan2(player.y - e.y, player.x - e.x), 165 + Math.min(80, G.wave * 4), 5, e.c || '#ff5577');
         }
       }
@@ -2158,7 +2245,7 @@ function updEnemies(dt) {
         e.x += e.vx * dt; e.y += e.vy * dt;
         if (sd < 62) {
           e.hp -= 40 * dt; e.hitT = 0.06;
-          if (Math.random() < dt * 20) sparkHit(e.x, e.y, '#b46bff');
+          if (Math.random() < dt * 20 * PF()) sparkHit(e.x, e.y, '#b46bff');
           if (e.hp <= 0) {
             killEnemy(i); G.sgKills++;
             if (G.sgKills >= 8) unlock('devour8');
@@ -2313,7 +2400,7 @@ function updBoss(dt) {
     b.fireT -= dt;
     if (b.fireT <= 0) {
       b.fireT = 0.55; b.gapI = (b.gapI + 3) % 18;
-      const n2 = 18, off = R(0, TAU / n2);
+      const n2 = 18, off = RG(0, TAU / n2);
       for (let i = 0; i < n2; i++) {
         const dd = Math.min(Math.abs(i - b.gapI), n2 - Math.abs(i - b.gapI));
         if (dd < 2) continue;
@@ -2325,11 +2412,11 @@ function updBoss(dt) {
   } else if (b.st === 'blink') {
     b.fireT -= dt;
     if (b.fireT <= 0 && b.gapI < 3) {
-      const ang2 = R(0, TAU), dd2 = R(150, 230);
+      const ang2 = RG(0, TAU), dd2 = RG(150, 230);
       b.x = CL(player.x + Math.cos(ang2) * dd2, 70, W - 70);
       b.y = CL(player.y + Math.sin(ang2) * dd2, 70, H - 70);
       const n2 = 12 + b.bn * 2;
-      for (let i = 0; i < n2; i++) eb(b.x, b.y, i / n2 * TAU + R(0, 0.3), 230, 4.5, b.kc2);
+      for (let i = 0; i < n2; i++) eb(b.x, b.y, i / n2 * TAU + RG(0, 0.3), 230, 4.5, b.kc2);
       boom(b.x, b.y, b.kc, 16, 6);
       tone('square', 520, 130, 0.14, 0.07);
       b.gapI++;
@@ -2366,7 +2453,7 @@ function updBoss(dt) {
     b.fireT -= dt;
     if (b.fireT <= 0) {
       b.fireT = 0.52; b.gapI = (b.gapI + 2) % 22;
-      const n4 = 22, off = R(0, TAU);
+      const n4 = 22, off = RG(0, TAU);
       for (let i = 0; i < n4; i++) {
         const dd = Math.min(Math.abs(i - b.gapI), n4 - Math.abs(i - b.gapI));
         if (dd < 3) continue;
@@ -2385,7 +2472,7 @@ function updBoss(dt) {
   } else if (b.st === 'charging') {
     b.x += b.cvx * dt; b.y += b.cvy * dt;
     b.x = CL(b.x, 60, W - 60); b.y = CL(b.y, 60, H - 60);
-    if (Math.random() < 0.7) parts.push({ type: 0, x: b.x + R(-20, 20), y: b.y + R(-20, 20),
+    if (Math.random() < 0.7 * PF()) parts.push({ type: 0, x: b.x + R(-20, 20), y: b.y + R(-20, 20),
       vx: R(-40, 40), vy: R(-40, 40), life: R(0.2, 0.4), ml: 0.4, c: '#ff3355', sz: R(1.5, 3), drag: 2 });
     if (b.stT <= 0) { b.st = 'idle'; b.stT = 1.1; boom(b.x, b.y, '#ff3355', 22, 9); }
   }
@@ -2554,7 +2641,9 @@ function updParts(dt) {
   if (parts.length > pmax) parts.splice(0, parts.length - pmax);
 }
 function PMAX() {
-  return Math.max(320, Math.min(750, Math.round(750 * W * H / 947100)));
+  // [PERF-L] L1/L2 粒子预算减半（画布面积缩放基础上再折半）
+  const base = Math.max(320, Math.min(750, Math.round(750 * W * H / 947100)));
+  return G.tier >= 1 ? base >> 1 : base;
 }
 function updTexts(dt) {
   for (let i = texts.length - 1; i >= 0; i--) {
@@ -2591,7 +2680,7 @@ function updMines(dt) {
 function mineExplode(m, i) {
   mines.splice(i, 1);
   boom(m.x, m.y, '#ff6666', 18, 6);
-  for (let j = 0; j < 8; j++) eb(m.x, m.y, j / 8 * TAU + R(0, 0.4), 185, 4, '#ff7755');
+  for (let j = 0; j < 8; j++) eb(m.x, m.y, j / 8 * TAU + RG(0, 0.4), 185, 4, '#ff7755');
   sfxExplode(12);
   G.shake = Math.min(12, G.shake + 5);
 }
@@ -2633,7 +2722,7 @@ function waveLogic(dt) {
       G.waveDelay -= dt;
       if (G.waveDelay <= 0) {
         queueSpawn(G.waveQueue.shift());
-        G.waveDelay = 1.4 * R(0.8, 1.2);
+        G.waveDelay = 1.4 * RG(0.8, 1.2);
       }
     } else if (!enemies.length && !marks.length && !mines.length && !G.boss) {
       G.brushCd -= dt;
@@ -2644,7 +2733,7 @@ function waveLogic(dt) {
     G.waveDelay -= dt;
     if (G.waveDelay <= 0) {
       queueSpawn(G.waveQueue.shift());
-      G.waveDelay = CL(1.15 - G.wave * 0.045, 0.35, 1.15) * R(0.7, 1.25) * (G.abyss ? 0.72 : 1);
+      G.waveDelay = CL(1.15 - G.wave * 0.045, 0.35, 1.15) * RG(0.7, 1.25) * (G.abyss ? 0.72 : 1);
     }
   } else if (!enemies.length && !marks.length && !mines.length && !G.boss) {
     if (!G.cleared) { G.cleared = true; waveBonus(); G.inter = 2.2; }
@@ -2663,10 +2752,10 @@ function waveLogic(dt) {
     if (m.t <= 0) {
       const en = makeEnemy(m.k, m.x, m.y, m.elite);
       if (m.k === 'meteor') {
-        const ta = Math.atan2(player.y + R(-140, 140) - m.y, player.x + R(-180, 180) - m.x);
+        const ta = Math.atan2(player.y + RG(-140, 140) - m.y, player.x + RG(-180, 180) - m.x);
         en.vx = Math.cos(ta) * en.sp; en.vy = Math.sin(ta) * en.sp;
         en.hp = en.maxhp = Math.max(2, Math.round(3 + G.wave * 0.35));
-        en.r = R(14, 22);
+        en.r = RG(14, 22);
       }
       enemies.push(en);
       marks.splice(i, 1);
@@ -2755,7 +2844,7 @@ function update(dt) {
   if (G.sgT > 0) {
     G.sgT -= dt;
     gridPush(G.sgX, G.sgY, 300, -1100, dt);
-    if (Math.random() < dt * 45) {
+    if (Math.random() < dt * 45 * PF()) {
       const a = R(0, TAU), dd = R(60, 150);
       const ta = a + Math.PI / 2;
       parts.push({ type: 1, x: G.sgX + Math.cos(a) * dd, y: G.sgY + Math.sin(a) * dd,
@@ -2886,10 +2975,11 @@ function drawUpgradeIcon(k) {
 
 /* ================= draw: world ================= */
 function drawStars() {
+  // [PERF-L] L2 背景静态化：闪烁相位冻结（省去每星 sin），位置视差保留
   for (const s of stars) {
     const px = ((s.x * W + player.x * -0.03 * s.z) % W + W) % W;
     const py = ((s.y * H + player.y * -0.03 * s.z) % H + H) % H;
-    ctx.globalAlpha = s.z * (0.3 + 0.28 * Math.sin(G.time * 1.7 + s.tw));
+    ctx.globalAlpha = s.z * (G.tier >= 2 ? 0.42 : 0.3 + 0.28 * Math.sin(G.time * 1.7 + s.tw));
     ctx.fillStyle = s.z > 0.75 ? '#cfe9ff' : '#7fa8d8';
     const sz = s.z * 2;
     ctx.fillRect(px, py, sz, sz);
@@ -3677,6 +3767,25 @@ function drawBanner() {
   ctx.restore();
   ctx.globalAlpha = 1;
 }
+/* [PERF-L] 画质档位 toast：自动降档/回升时一次性提示当前档位（顶部居中小胶囊，2.6s 自灭） */
+function drawQToast() {
+  const q = G.qToast;
+  if (!q) return;
+  const a = q.t < 0.25 ? q.t / 0.25 : q.t > 2.1 ? CL((2.6 - q.t) / 0.5, 0, 1) : 1;
+  ctx.font = '600 12px ' + FONT;
+  const w2 = Math.ceil(ctx.measureText(q.msg).width) + 30;
+  const x0 = W / 2 - w2 / 2, y0 = 12 + SAFE.t;
+  ctx.save();
+  ctx.globalAlpha = a * 0.95;
+  ctx.fillStyle = 'rgba(8,14,30,0.92)';
+  ctx.strokeStyle = '#9fdcff';
+  ctx.lineWidth = 1.2;
+  rr(x0, y0, w2, 24, 12);
+  ctx.fill(); ctx.stroke();
+  ctx.globalAlpha = a;
+  txt(q.msg, W / 2, y0 + 13, 12, '#9fdcff', 'center', 600, true);
+  ctx.restore();
+}
 function drawReticle() {
   if (G.touchMode || G.state !== 'playing' || !mouse.inside) return;
   const kr = 1 - Math.exp(-16 * RDT);
@@ -3831,12 +3940,12 @@ function drawOverlay() {
       ctx.shadowBlur = 0;
       txt('点击选项立即生效并保存 · 点击生效自动保存', cx, H * 0.425 + 22, 11, 'rgba(170,210,240,.7)', 'center', 500);
       // [FIX-COS3] 矮视口下首行下移避开提示行、行距收紧，避免 7 行设置项超出屏幕底缘或压住提示行/返回按钮
-      const setC = H < 560;
-      const setY0 = setC ? H * 0.425 + 36 : H * 0.47;
-      const setPitch = setC ? 20 : 40;
+      // [FIX-COS8] 行几何统一走 setGeom()：设置页 7 行让位荣誉榜块与「ESC · 返回」按钮，两档视口都不叠字；
+      // 选项按钮（titleBtns 的 cfg:*）用同一份几何，标签与按钮永不错位
+      const sg = setGeom();
       CFGS.forEach((r) => {
         const i = CFGS.indexOf(r);
-        txt(r.n, W / 2 - 20, setY0 + i * setPitch + (setC ? 10 : 13), 12.5, '#dfeeff', 'right', 700);
+        txt(r.n, W / 2 - 20, sg.y0 + i * sg.pitch + (sg.compact ? 10 : 13), 12.5, '#dfeeff', 'right', 700);
       });
     } else if (G.tStage === 'credits') {
       // [FIX-COS6] 矮视口（手机横屏）关于页：页眉上移避开正文首行（正文起点同为 H*0.22）
@@ -3846,43 +3955,44 @@ function drawOverlay() {
       ctx.shadowBlur = 0;
       const cl = [
         ['NEON VOID · 霓虹虚空', 22, '#eaf6ff', 800],
-        ['v1.3.0 · 单文件 · 零依赖 · ~230KB', 12, 'rgba(170,200,235,.8)', 600],
+        ['v1.4.0 · 单文件 · 零依赖 · ~250KB', 12, 'rgba(170,200,235,.8)', 600],
         ['v1.0.2 修复：无尽模式高波次白屏 · 超频射控失效 · 屏幕外残敌卡波', 11, 'rgba(120,230,190,.85)', 600],
         ['v1.0.3 平衡：高波次难度曲线（数量↑ / 血量封顶）· 帧循环微调', 11, 'rgba(120,230,190,.85)', 600],
         ['v1.1.0 扩充：奇点之瞳降临 · 双螺旋/镜面折返弹幕 · 超导闪现/虚空结晶/擦弹领域', 11, 'rgba(120,230,190,.85)', 600],
         ['v1.2.0 扩充：新星爆发弹幕 · 死亡绽放/共鸣核心 · 深渊回廊（无尽 30 波+）· 悬赏码 v3', 11, 'rgba(120,230,190,.85)', 600],
         ['v1.3.0 扩充：擦弹专精（开火封印 · 擦弹即得分）· 连战构建器（自选菜单 · #rush 分享码）', 11, 'rgba(120,230,190,.85)', 600],
+        ['v1.4.0 扩充：每日挑战留存（本机最佳/连续天数）· 画质自适应 L0-L2（低端机兜底）', 11, 'rgba(120,230,190,.85)', 600],
         ['', 10, '', 400],
         ['设计 · 代码 · 美术 · 音乐', 14, '#dfeeff', 700],
         ['全部由 AI 通过 VIBECODING 创作', 14, '#ff7ad9', 700],
         ['', 10, '', 400],
         ['Canvas 2D · WebAudio 实时合成音源', 12, 'rgba(170,200,235,.8)', 500],
-        ['9 形态 · 1320 词条组合 · 6 BOSS · 33 成就 · 14 构筑卡', 12, 'rgba(170,200,235,.8)', 500],
+        ['9 形态 · 1320 词条组合 · 6 BOSS · 35 成就 · 14 构筑卡', 12, 'rgba(170,200,235,.8)', 500],
         ['双人同屏 · 人机对抗 · 每日同卷 · 自定义连战 · 奇点终技', 12, 'rgba(170,200,235,.8)', 500],
         ['', 10, '', 400],
         ['感谢游玩 · KEEP VIBING', 16, '#3dff9e', 800]
       ];
       // [FIX-COS6] 矮视口（手机横屏）关于页原样绘制会溢出屏幕底缘 → 缩字号/行距并跳过空行，桌面几何不变
+      // [FIX-COS7] 关于页与荣誉榜块碰撞：榜块（H>430 时自 H*0.80 起画，含每日留存行）在本页仍然绘制，
+      // 而正文按固定行距推进、⚡ 固定画在 H*0.84 → 桌面上「感谢游玩/⚡」压住榜单行。
+      // 改为：正文终点让位榜块顶（无榜块时让位返回按钮），行距先收、仍放不下整体缩字号；
+      // ⚡ 跟随正文流排版，不再固定 H*0.84。与设置页 [FIX-COS8] 同一让位原则。
       const cf = s2 => cC ? (s2 >= 20 ? 16 : s2 >= 14 ? 12 : s2 >= 12 ? 10.5 : 9.5) : s2;
-      // [FIX-COS7] 关于页与荣誉榜文字碰撞：荣誉榜/每日榜块（H>430 时从 H*0.80 起画到 +51）在关于页
-      // 仍然绘制，而正文按固定行距推进到 ~H*0.80、⚡ 固定画在 H*0.84 → 桌面 1280×800 上「感谢游玩」
-      // 压住荣誉榜标题、⚡ 压住榜单行。改为：正文终点让位榜单块顶（无榜时让位返回按钮），行距先收、
-      // 仍放不下再整体缩字号；⚡ 跟随正文流排版，不再固定 H*0.84。桌面 1280×800 与横屏 844×390 均不重叠。
-      const honTop = (H > 430 ? H * 0.80 : H - 64 - SAFE.b) - 14;
-      const cyTop = H * (cC ? 0.22 : 0.30);
-      const drawn = cC ? cl.filter(li => li[0]) : cl;
-      const sumF = drawn.reduce((a2, li) => a2 + cf(li[1]), 0);
-      const gap2 = CL((honTop - cyTop - sumF - 34) / drawn.length, 4, cC ? 6 : 13);
-      const k = Math.min(1, (honTop - cyTop) / (sumF + drawn.length * gap2 + 34));
-      let cyv = cyTop;
+      const honTop7 = (H > 430 ? H * 0.80 : H - 64 - SAFE.b) - 14;
+      const cyTop7 = H * (cC ? 0.22 : 0.30);
+      const drawn7 = cC ? cl.filter(li => li[0]) : cl;
+      const sumF7 = drawn7.reduce((a2, li) => a2 + cf(li[1]), 0);
+      const gap7 = CL((honTop7 - cyTop7 - sumF7 - 34) / drawn7.length, 4, cC ? 6 : 13);
+      const k7 = Math.min(1, (honTop7 - cyTop7) / (sumF7 + drawn7.length * gap7 + 34));
+      let cyv = cyTop7;
       for (const li of cl) {
         if (li[0] || !cC) {
-          if (li[0]) txt(li[0], cx, cyv, cf(li[1]) * k, li[2], 'center', li[3]);
-          cyv += (cf(li[1]) + gap2) * k;
+          if (li[0]) txt(li[0], cx, cyv, Math.max(8, cf(li[1]) * k7), li[2], 'center', li[3]);
+          cyv += Math.max(8, cf(li[1]) * k7) + gap7;
         }
       }
       const fl = 0.5 + 0.5 * Math.sin(G.time * 2);
-      txt('⚡', cx, cyv + 13 * k, (20 + fl * 5) * k, 'rgba(255,226,100,' + (0.45 + 0.5 * fl) + ')', 'center', 800);
+      txt('⚡', cx, Math.min(H * 0.84, cyv + 16), 20 + fl * 5, 'rgba(255,226,100,' + (0.45 + 0.5 * fl) + ')', 'center', 800);
     } else if (G.tStage === 'ghost') {
       const gh = G.ghost;
       ctx.shadowColor = '#8affd4'; ctx.shadowBlur = 16;
@@ -4023,7 +4133,8 @@ function drawOverlay() {
         txt('击杀拾取水晶 · 升级三选一 · 构筑你的流派', cx, H * 0.70 + 38, 12, 'rgba(160,195,235,.6)', 'center', 500);
       }
     }
-    if (G.tStage !== 'ach' && H > 430) {
+    // [FIX-COS8] 榜块绘制门：成就页不画（原样）；设置页在 setGeom 判定放不下时本页隐藏，其余照旧
+    if (G.tStage !== 'ach' && H > 430 && !(G.tStage === 'set' && !setGeom().honFit)) {
       if (G.tSel === 'daily' && G.daily && G.daily.rows.length) {
         txt('── 每日挑战 · 今日排行 · ' + G.daily.date + ' ──', cx, H * 0.80, 10.5, 'rgba(120,230,180,.6)', 'center', 600);
         const dn2 = Math.min(3, G.daily.rows.length);
@@ -4032,17 +4143,23 @@ function drawOverlay() {
           txt((li + 1) + '  ' + pad(r2.s, 7) + '  W' + r2.w + (r2.c ? ' · 双人' : ''),
             cx, H * 0.80 + 19 + li * 16, 11.5, li === 0 ? '#3dff9e' : 'rgba(190,240,215,.8)', 'center', 600, true);
         }
+        // [DAILY2] 标题页补本机留存摘要：历史最佳 / 连续挑战天数
+        if (G.dstat && (G.dstat.best.s > 0 || G.dstat.streak > 0)) {
+          txt('本机最佳 ' + pad(G.dstat.best.s, 7) + (G.dstat.streak > 1 ? ' · 连续 ' + G.dstat.streak + ' 天' : ''),
+            cx, H * 0.80 + 19 + dn2 * 16 + 4, 10.5, 'rgba(150,230,200,.65)', 'center', 600, true);
+        }
       } else if (G.lb.length) {
       txt('── 荣誉榜 · HALL OF FAME ──', cx, H * 0.80, 10.5, 'rgba(140,180,230,.55)', 'center', 600);
       const ln2 = Math.min(3, G.lb.length);
       for (let li = 0; li < ln2; li++) {
         const r2 = G.lb[li];
-        txt((li + 1) + '  ' + (r2.r ? '[' + r2.r + '] ' : '') + pad(r2.s, 7) + '  ' + MODE_TAG[r2.m] + (r2.m === 'versus' ? ' · 命中 ' + r2.w : ' · W' + r2.w) + (r2.c ? ' · 双人' : ''),
+        // [DAILY2] 每日挑战行追加 DAILY 形态标注（得分×2，不与其他形态直接比较）
+        txt((li + 1) + '  ' + (r2.r ? '[' + r2.r + '] ' : '') + pad(r2.s, 7) + '  ' + MODE_TAG[r2.m] + (r2.m === 'daily' ? '·DAILY' : '') + (r2.m === 'versus' ? ' · 命中 ' + r2.w : ' · W' + r2.w) + (r2.c ? ' · 双人' : ''),
           cx, H * 0.80 + 19 + li * 16, 11.5, li === 0 ? '#ffc233' : 'rgba(190,215,240,.8)', 'center', 600, true);
       }
       }
     }
-    if (G.tStage !== 'brb') txt('P 暂停 · M 静音 · A 成就 · G 指南 · S 设置 · C 关于 · B 构建器 · NEON VOID v1.3.0', cx, H - 14, 10, 'rgba(140,170,210,.4)', 'center', 500, true);
+    if (G.tStage !== 'brb') txt('P 暂停 · M 静音 · A 成就 · G 指南 · S 设置 · C 关于 · B 构建器 · NEON VOID v1.4.0', cx, H - 14, 10, 'rgba(140,170,210,.4)', 'center', 500, true);
   } else if (G.state === 'levelup') {
     ctx.fillStyle = 'rgba(3,5,16,.8)';
     ctx.fillRect(0, 0, W, H);
@@ -4215,6 +4332,14 @@ function drawOverlay() {
       const dy2 = Math.max(H * 0.378, spBottom + 9);
       txt('今日排行 · DAILY RANK #' + G.dailyRank, cx, dy2, 12, 'rgba(150,255,200,.9)', 'center', 700, true);
       spBottom = dy2 + 6;
+      // [DAILY2] 结算展示本机今日最佳与连续挑战天数（留存钩子）
+      const tb = G.daily && G.daily.rows.length ? G.daily.rows[0].s : 0;
+      const stk = G.dstat && G.dstat.streak > 0 ? G.dstat.streak : 0;
+      if (tb > 0 || stk > 0) {
+        const dy3 = Math.max(H * 0.378, spBottom + 9);
+        txt('本机今日最佳 ' + pad(tb, 7) + (stk > 0 ? ' · 连续挑战 ' + stk + ' 天' : ''), cx, dy3, 11.5, 'rgba(150,230,200,.8)', 'center', 600, true);
+        spBottom = dy3 + 6;
+      }
     } else if (G.lbRank > 0) {
       const ly2 = Math.max(H * 0.378, spBottom + 9);
       txt('荣誉榜第 ' + G.lbRank + ' 名 · HALL OF FAME #' + G.lbRank, cx, ly2, 12, 'rgba(255,220,140,.85)', 'center', 700, true);
@@ -4360,6 +4485,7 @@ function render() {
   }
   if (G.state === 'playing' || G.state === 'paused' || G.state === 'levelup' || G.state === 'wgate') drawHUD();
   drawBanner();
+  drawQToast();
   drawAchPop();
   drawReticle();
   if (G.flash > 0) {
@@ -4405,6 +4531,41 @@ function wgateAct(k) {
   startWave(G.pendingWave);
   uiClick();
 }
+/* [FIX-COS8] 设置页几何（渲染与点击按钮共用）：7 行设置项在两档视口都要让位
+   ① 荣誉榜/每日榜块（H>430 时自 H*0.80 起画到 +51）② 页底「ESC · 返回」按钮。
+   让位次序：先上移首行（≤10px）→ 再收行距（下限 18/28，保证 12.5px 行文字不互相叠）
+   → 仍放不下则本页隐藏榜块（honFit=false，行块退守返回按钮上方的安全线）。
+   参照关于页 [FIX-COS7] 的做法：正文/行块与榜单块不重叠，短视口优先保可读性。 */
+function setGeom() {
+  const compact = H < 560;
+  const h = compact ? 20 : 26, n = CFGS.length;
+  const pfloor = compact ? 18 : 28;
+  let y0 = compact ? H * 0.425 + 36 : H * 0.47;
+  let pitch = compact ? 20 : 40;
+  const honTop = H * 0.80 - 12;
+  const backTop = H - 44 - SAFE.b - 10;
+  let honFit = true;
+  const bottom0 = y0 + (n - 1) * pitch + h;
+  if (H > 430 && bottom0 > honTop) {
+    const y0min = y0 - (compact ? 6 : 10);
+    if (honTop - 8 - y0min >= (n - 1) * pitch + h) y0 = y0min;
+    else {
+      const fit = (honTop - 8 - y0min - h) / (n - 1);
+      if (fit >= pfloor) { y0 = y0min; pitch = fit; }
+      else honFit = false;
+    }
+  }
+  // 返回按钮保险丝：无论榜单是否显示，行块底边绝不越过按钮上沿（含矮视口极限情况压到下限行距）
+  const limit = honFit && H > 430 ? Math.min(backTop, honTop) : backTop;
+  if (y0 + (n - 1) * pitch + h > limit) {
+    const fit = (limit - 8 - y0 - h) / (n - 1);
+    pitch = CL(fit, pfloor, pitch);
+    // 行距已到下限仍放不下（极矮视口）→ 整体上移首行补差，但不越过副标题行（0.425H+30）
+    const deficit = y0 + (n - 1) * pitch + h - limit;
+    if (deficit > 0) y0 = Math.max(H * 0.425 + 30, y0 - deficit - 2);
+  }
+  return { compact, h, y0, pitch, honFit };
+}
 function titleBtns() {
   if (G.tStage === 'ghost') {
     const gRows = Math.ceil(GHOST_MAP.length / (W >= 760 ? 6 : (H < 460 ? 5 : 3)));
@@ -4417,19 +4578,13 @@ function titleBtns() {
   }
   if (G.tStage === 'ach' || G.tStage === 'set' || G.tStage === 'credits') {
     const out2 = [{ x: W / 2 - 70, y: H - 38 - SAFE.b, w: 140, h: 26, act: 'back', l: 'ESC · 返回', c: '#7d95b8' }];
-    if (G.tStage === 'credits') {
-      // [FIX-COS8] 关于页「反馈」入口：与设置/成就 chip 同一套点击实现（titleBtns 矩形命中 + titleAct），
-      // 放在「ESC · 返回」同行左侧，桌面鼠标与触屏 pointerdown 都可点，新标签打开 GitHub Issues
-      out2.push({ x: W / 2 - 70 - 158, y: H - 38 - SAFE.b, w: 150, h: 26, act: 'feedback', l: '💬 反馈 · GitHub Issues', c: '#4de3ff', f: 11 });
-    }
     if (G.tStage === 'set') {
-      const setC2 = H < 560;
-      const setY02 = setC2 ? H * 0.425 + 36 : H * 0.47;
-      const setPitch2 = setC2 ? 20 : 40;
+      // [FIX-COS8] 与渲染侧共用 setGeom()，矮视口行距压缩后按钮仍与行标签对齐
+      const sg = setGeom();
       CFGS.forEach((r) => {
         r.o.forEach((on, oi) => {
-          out2.push({ x: W / 2 + 10 + oi * 68, y: setY02 + CFGS.indexOf(r) * setPitch2, w: 62, h: setC2 ? 20 : 26,
-            act: 'cfg:' + r.k + ':' + oi, l: on, c: CFG[r.k] === oi ? '#ffc233' : '#5a7090', f: setC2 ? 11 : undefined });
+          out2.push({ x: W / 2 + 10 + oi * 68, y: sg.y0 + CFGS.indexOf(r) * sg.pitch, w: 62, h: sg.h,
+            act: 'cfg:' + r.k + ':' + oi, l: on, c: CFG[r.k] === oi ? '#ffc233' : '#5a7090', f: sg.compact ? 11 : undefined });
         });
       });
     }
@@ -4550,12 +4705,6 @@ function titleAct(a) {
   if (a === 'ach') { G.tStage = 'ach'; uiClick(); return; }
   if (a === 'set') { G.tStage = 'set'; uiClick(); return; }
   if (a === 'credits') { G.tStage = 'credits'; uiClick(); return; }
-  if (a === 'feedback') {
-    // [FIX-COS8] 反馈入口：GitHub Issues 新标签打开（noopener 断开 opener，防反向 tab 劫持）
-    uiClick();
-    try { window.open('https://github.com/c1xy/neon-void/issues', '_blank', 'noopener'); } catch (e) {}
-    return;
-  }
   if (a === 'guide') { G.tStage = 'guide'; uiClick(); return; }
   if (a.slice(0, 3) === 'gp:') { G.gp = +a.slice(3); uiClick(); return; }
   if (a.slice(0, 4) === 'cfg:') {
@@ -4843,14 +4992,21 @@ function frame(now) {
   RDT = Math.min(0.05, (now - last) / 1000);
   last = now;
   G.ftEma = G.ftEma * 0.95 + RDT * 1000 * 0.05;
-  G.qT += RDT;
-  if (CFG.fx === 1) G.q = 2;
-  else if (CFG.fx === 2) G.q = Math.min(G.q, 1);
-  else if (G.qT > 2) {
-    G.qT = 0;
-    if (G.ftEma > 22 && G.q > 0) G.q--;
-    else if (G.ftEma < 15 && G.q < 2) G.q++;
+  // [PERF-L] 画质档位治理器：手动「高/低」直接锁档；自动档只在对局中计量（标题/暂停的帧率不代表负载）。
+  // fps<40 持续 10s → 降一档；fps≥55 持续 20s → 回升一档；40~55 观望带内不动作（迟滞防抖）。
+  if (CFG.fx === 1) setTier(0);
+  else if (CFG.fx === 2) setTier(2);
+  else if (G.state === 'playing') {
+    const fps = 1000 / Math.max(4, G.ftEma);
+    if (fps < 40) {
+      G.tLow += RDT; G.tHigh = 0;
+      if (G.tLow >= 10 && G.tier < 2) { setTier(G.tier + 1, true); }
+    } else if (fps >= 55) {
+      G.tHigh += RDT; G.tLow = 0;
+      if (G.tHigh >= 20 && G.tier > 0) { setTier(G.tier - 1, true); }
+    } else { G.tLow = 0; G.tHigh = 0; }
   }
+  if (G.qToast) { G.qToast.t += RDT; if (G.qToast.t > 2.6) G.qToast = null; }
   if (G.banner) { G.banner.t += RDT; if (G.banner.t >= G.banner.d) G.banner = null; }
   if (G.achPop) { G.achPop.t += RDT; if (G.achPop.t > 3.4) G.achPop = null; }
   if (G.state === 'over') G.over += RDT;
@@ -4990,6 +5146,28 @@ if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
   window.addEventListener('load', () => { try { navigator.serviceWorker.register('sw.js').catch(() => {}); } catch (e) {} });
 }
 schedule();
+/* [NV-DBG] 只读自检钩子：验收脚本用（快照战场/升级序列、注入测试输入）。不参与任何游戏逻辑，
+   生产路径零调用；只读写游戏已有状态，不触碰存档格式与悬赏码。 */
+window.NV_SNAP = () => ({
+  state: G.state, mode: G.mode, wave: G.wave, score: Math.floor(G.score), level: G.level,
+  muts: G.muts.slice(), mutE: G.mutE.slice(), seed: RSTATE >>> 0, tier: G.tier, q: G.q,
+  ebCap: EB_CAP, ftEma: Math.round(G.ftEma * 100) / 100,
+  enemies: enemies.map(e => [e.t, e.elite ? 1 : 0, Math.round(e.x * 4) / 4, Math.round(e.y * 4) / 4, e.hp, e.maxhp, Math.round(e.sp * 100) / 100]),
+  queue: G.waveQueue.slice(), marks: marks.map(m => [m.k, Math.round(m.x), Math.round(m.y)]),
+  cards: (G.cards || []).map(c => c.u.k),
+  boss: G.boss ? [G.boss.ki, G.boss.st, G.boss.hp, G.boss.maxhp] : null,
+  dailyRank: G.dailyRank, dstat: G.dstat ? { streak: G.dstat.streak, best: G.dstat.best.s, mcombo: G.dstat.mcombo } : null,
+  ach: G.ach.slice(), qToast: G.qToast ? G.qToast.msg : null, errStreak: G.errStreak,
+  sgeom: G.tStage === 'set' ? setGeom() : null
+});
+window.NV_CHEAT = {
+  xp: () => { G.xp = G.xpNeed; },              // 直接触发升级三选一（验证升级序列确定性）
+  fps: f => { G.ftEma = 1000 / f; },           // 模拟帧率（验证画质档位降/升）
+  lowNow: () => { G.tLow = 10.01; G.tHigh = 0; }, // 直接满足降档持时（跳过 10s 等待）
+  highNow: () => { G.tHigh = 20.01; G.tLow = 0; }, // 直接满足回升持时
+  kill: () => { G.lives = 1; hurtShip(player); }, // 测试专用速死走 recordScore（验证 dstat/成就/结算链路）
+  tier: () => G.tier
+};
 })();
 </script>
 
