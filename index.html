@@ -102,6 +102,9 @@ const G = {
   boss: null, banner: null,
   ghost: null, endSnap: null, chainCode: null,
   rush: null, rushRun: null, waveGrz: 0,
+  duel: null, duelRun: null, duelInv: false, duelShareMsg: '', duelRes: null,
+  duels: [],
+  shadowOn: false, shadowRun: false, shadowRef: null, shSamp: [], shT: 0, shAct: 0,
   waveQueue: [], waveDelay: 0, inter: 0, cleared: false,
   slow: 1, slowT: 0, hitstop: 0, shake: 0, flash: 0, chroma: 0,
   time: 0, runT: 0, over: 0, muted: false, ms: []
@@ -137,10 +140,11 @@ const MODES = [
   { k: 'versus',  n: '对抗对决', en: 'VERSUS', d: 'P2 操控 BOSS · 1v1 决斗', c: '#ff2e7e', key: '6' },
   { k: 'graze',   n: '擦弹专精', en: 'GRAZE RUN', d: '开火封印 · 擦弹即得分 · 无尽', c: '#eaff6a', key: '7' }
 ];
-const MODE_TAG = { classic: '经典', endless: '无尽', boss: '连战', chaos: '混沌', daily: '每日', versus: '对抗', ghost: '残影', graze: '擦弹', brb: '连战构建' };
+const MODE_TAG = { classic: '经典', endless: '无尽', boss: '连战', chaos: '混沌', daily: '每日', versus: '对抗', ghost: '残影', graze: '擦弹', brb: '连战构建', duel: '对决' };
 // 结算战报/验尸海报的模式名：brb（构建器连战）不在 MODES 里，ghost 有专属称谓，统一从这里取
 function modeName() {
   if (G.mode === 'ghost') return '残影讨伐 · GHOST';
+  if (G.mode === 'duel') return '种子对决 · SEED DUEL';
   if (G.mode === 'brb') return '连战构建器 · 自定义连战';
   const md = MODES.find(m => m.k === G.mode);
   return md ? md.n : '经典战役';
@@ -245,7 +249,8 @@ const ACHV = [
   { k: 'grazeboss', n: '阅弹无数', d: '擦弹专精无伤挺过一场 BOSS 弹幕', c: '#eaff6a' },
   { k: 'brb1',     n: '策展人', d: '通关一场自定义连战', c: '#38c8ff' },
   { k: 'brb6',     n: '全席晚宴', d: '通关包含全部 6 个 BOSS 的自定义连战', c: '#ffc233' },
-  { k: 'brbhell',  n: '地狱菜单', d: '以「地狱」血量通关 3 场以上的自定义连战', c: '#ff3355' }
+  { k: 'brbhell',  n: '地狱菜单', d: '以「地狱」血量通关 3 场以上的自定义连战', c: '#ff3355' },
+  { k: 'duelwin',  n: '对决制胜', d: '在种子对决的成绩对决中击败对手', c: '#ff9a3c' }
 ];
 function dateStr() { const d = new Date(); return d.getFullYear() + '-' + pad(d.getMonth() + 1, 2) + '-' + pad(d.getDate(), 2); }
 function loadAch() {
@@ -307,9 +312,9 @@ function fmtTime(s) {
   const m = Math.floor(ms / 60000), sec = Math.floor(ms / 1000) % 60, cs = Math.floor(ms / 10) % 100;
   return pad(m, 2) + ':' + pad(sec, 2) + '.' + pad(cs, 2);
 }
-const CFG = { sfx: 2, mus: 2, fx: 0, shake: 1, scan: 1, mute: 0, wgate: 0 };
+const CFG = { sfx: 2, mus: 2, fx: 0, shake: 1, scan: 1, mute: 0, wgate: 0, shadow: 1 };
 try { Object.assign(CFG, JSON.parse(localStorage.getItem('neonvoid_cfg') || '{}')); } catch (e) {}
-const CFG_RNG = { sfx: 2, mus: 2, fx: 2, shake: 1, scan: 1, mute: 1, wgate: 1 };
+const CFG_RNG = { sfx: 2, mus: 2, fx: 2, shake: 1, scan: 1, mute: 1, wgate: 1, shadow: 1 };
 for (const ck in CFG_RNG) {
   if (typeof CFG[ck] !== 'number' || CFG[ck] < 0 || CFG[ck] > CFG_RNG[ck] || Math.floor(CFG[ck]) !== CFG[ck]) CFG[ck] = CFG_RNG[ck];
 }
@@ -321,7 +326,10 @@ const CFGS = [
   { k: 'mus',   n: '音乐音量',  o: ['关', '低', '正常'] },
   { k: 'fx',    n: '画质',      o: ['自动', '高', '低'] },
   { k: 'shake', n: '屏幕震动',  o: ['开', '关'] },
-  { k: 'scan',  n: 'CRT 扫描线', o: ['开', '关'] }
+  { k: 'scan',  n: 'CRT 扫描线', o: ['开', '关'] },
+  // [FIX-CFG1] 选项序用 ['关','开']（同「波间暂停」）：CFG_RNG 的值兼任「默认值/合法上限」，序号 1 必须=开，
+  // 否则缺键回填 1 会显示『关』而布尔真值闸门（采样/入口）当作开——上一版 ['开','关'] 两套语义正好相反
+  { k: 'shadow', n: '昨日之影', o: ['关', '开'] }
 ];
 function saveCfg() { try { localStorage.setItem('neonvoid_cfg', JSON.stringify(CFG)); } catch (e) {} }
 const GUIDE = [
@@ -360,7 +368,10 @@ const GUIDE = [
     '连战构建器（主界面按 B）：点 BOSS 头像排 1-8 场出场序列，三档血量',
     '「复制分享链接」生成 #rush= 码；好友打开链接直接迎战你的自定义菜单',
     '自定义连战的成绩进同一荣誉榜（标注「连战构建」），评级线与 BOSS 连战一致',
-    '每日挑战卷面按日期播种，荣誉榜行标注 DAILY、评级线独立；连续 7 天有「七日之约」成就'
+    '每日挑战卷面按日期播种，荣誉榜行标注 DAILY、评级线独立；连续 7 天有「七日之约」成就',
+    '种子对决（主界面「⚔ 种子对决」）：对决码编码 seed/初始构筑/波次上限——同码同卷同词条同升级序列',
+    '对决打满波次上限即完成；结算按 D 复制成绩码回贴给对手，双方各开对方成绩码即判胜负，历史入「对决史」',
+    '昨日之影：每日挑战每 0.5 秒记录走位（本机留存 7 天）；开每日挑战前可「召唤昨日之影」回放昨日走位，结算对比两日得分'
   ] }
 ];
 function applyCfg() {
@@ -1017,11 +1028,12 @@ function waveBonus() {
 }
 function startGame(gmode, pmode) {
   if (gmode !== 'ghost' || !G.ghost) {
-    if (!MODES.some(m => m.k === gmode) && gmode !== 'brb') gmode = G.mode || 'classic';
+    if (!MODES.some(m => m.k === gmode) && gmode !== 'brb' && gmode !== 'duel') gmode = G.mode || 'classic';
   }
   if (pmode !== 'coop' && pmode !== 'solo') pmode = G.coop ? 'coop' : 'solo';
-  // 擦弹专精/构建器连战固定单人：擦弹模式无开火（P2 自动开火会破坏规则），构建器走 BOSS 流程
-  if (gmode === 'versus' || gmode === 'ghost' || gmode === 'graze' || gmode === 'brb') pmode = 'solo';
+  // 擦弹专精/构建器连战/种子对决固定单人：擦弹模式无开火（P2 自动开火会破坏规则），构建器走 BOSS 流程，
+  // 对决要同码同卷公平比成绩（双人合作会破坏确定性比对）
+  if (gmode === 'versus' || gmode === 'ghost' || gmode === 'graze' || gmode === 'brb' || gmode === 'duel') pmode = 'solo';
   G.mode = gmode;
   G.coop = pmode === 'coop';
   audioInit();
@@ -1055,10 +1067,37 @@ function startGame(gmode, pmode) {
   G.rushRun = gmode === 'brb'
     ? (G.rush && G.rush.order && G.rush.order.length ? G.rush : { order: [0, 1, 2, 3, 4, 5], tier: 0 })
     : null;
-  // [DAILY1] 开局播种：每日=本地日期哈希（同一天全员同卷）；其他模式=运行时熵（体感与纯随机一致）。
+  // 种子对决：快照本局的对决参数（seed/构筑/波次上限）。快照后改构建器不影响本局判定；
+  // 无有效对决参数时降级回经典（防 startGame('duel') 在异常态被误入）
+  if (gmode === 'duel' && G.duel && Number.isFinite(G.duel.seed)) {
+    G.duelRun = { seed: G.duel.seed >>> 0, cap: CL(Math.floor(G.duel.cap || 10), 1, 99), lv: (G.duel.lv || []).slice(0, UPGRADES.length) };
+  } else {
+    if (gmode === 'duel') gmode = 'classic';
+    G.duelRun = null;
+  }
+  // [DAILY1] 开局播种：每日=本地日期哈希（同一天全员同卷）；种子对决=对决码里的 seed（同码同卷）；
+  // 其他模式=运行时熵（体感与纯随机一致）。
   // 玩法随机一律走 RSTATE 流；不再整体替换 Math.random（表现层随机与其解耦，见 DAILY1 注释块）。
   if (gmode === 'daily') srand(dailySeed());
+  else if (gmode === 'duel') srand(G.duelRun.seed);
   else srand((((Math.random() * 4294967296) >>> 0) ^ (Date.now() & 0x7fffffff) ^ (performance.now() * 1000 & 0x7fffffff)) >>> 0);
+  // 种子对决：对决码自带初始构筑——按 v3 卡位顺序预挂卡等（与三选一升级同管线，armor/revive 副作用一致），
+  // 等级/升级需求同步推算，保证「同码同构筑同升级序列」
+  if (gmode === 'duel' && G.duelRun) {
+    let lvSum = 0;
+    UPGRADES.forEach((u, i) => {
+      const lv = CL(Math.floor(G.duelRun.lv[i] || 0), 0, Math.min(7, u.max));
+      for (let j = 0; j < lv; j++) applyUpgrade(u.k);
+      lvSum += lv;
+    });
+    G.level = 1 + lvSum;
+    G.xpNeed = 30 + (G.level - 1) * 22;
+  }
+  // [SHADOW1] 昨日之影采样复位：仅每日挑战且设置开启时记录（表现数据，绝不触碰 RSTATE 玩法流）
+  G.shadowRef = (gmode === 'daily' && G.shadowOn && CFG.shadow) ? shadowYesterday() : null;
+  G.shadowRun = !!(gmode === 'daily' && G.shadowRef);
+  G.shSamp = (gmode === 'daily' && CFG.shadow) ? [] : null;
+  G.shT = 0; G.shAct = 0;
   player.x = W / 2 - (G.coop ? 90 : 0); player.y = H * 0.62; player.vx = 0; player.vy = 0;
   player.spawnT = 0.5;
   parts.push({ type: 2, x: player.x, y: player.y, vx: 0, vy: 0, rad: 4, vr: 620, life: 0.5, ml: 0.5, c: '#4de3ff', sz: 2.5, drag: 0 });
@@ -1081,7 +1120,7 @@ function startGame(gmode, pmode) {
   if (G.mode === 'graze') {
     banner('擦弹专精', 'GRAZE RUN · 开火封印 · 贴身擦弹得分 · 敌人掠过即撤离', '#eaff6a');
   }
-  if (G.mode === 'chaos' || G.mode === 'daily') {
+  if (G.mode === 'chaos' || G.mode === 'daily' || G.mode === 'duel') {
     const pool2 = MUTATORS.map(m => m.k);
     for (let i = 0; i < 3; i++) G.muts.push(pool2.splice(Math.floor(rnd() * pool2.length), 1)[0]);
     G.scoreMul = 2;
@@ -1090,6 +1129,8 @@ function startGame(gmode, pmode) {
     const names = G.muts.map(k2 => MUTATORS.find(m => m.k === k2).n).join(' · ');
     if (G.mode === 'daily') {
       banner('每日挑战 ' + dateStr(), 'DAILY RUN · 全员同卷 · ' + names, '#3dff9e');
+    } else if (G.mode === 'duel') {
+      banner('种子对决 ' + duelSeedText(G.duelRun.seed), 'SEED DUEL · 同码同卷 · ' + G.duelRun.cap + ' 波 · ' + names, '#ff9a3c');
     } else {
       banner('混沌挑战 · 得分×2', 'CHAOS · ' + names, '#ffe233');
     }
@@ -1174,7 +1215,11 @@ function recordScore() {
     try { localStorage.setItem('neonvoid_dstat', JSON.stringify(ds)); } catch (e) {}
     if (ds.streak >= 7) unlock('daily7');
     if (rk2 === 0 && rec2.s > 0) unlock('dailybest'); // 初战告捷：刷新本机今日最佳
+    // [SHADOW1] 本局采样落盘（同日取更高分），供明日「召唤昨日之影」回放
+    shadowSaveRun();
   }
+  // [DUEL2] 种子对决：我方成绩入对决史（同 seed 一条；对手成绩码已到过则当场判胜负）
+  if (G.mode === 'duel') duelRecordRun();
 }
 const RK = { S: '#ffc233', A: '#3dff9e', B: '#4de3ff', C: '#b46bff', D: '#8fa6c8' };
 const RN = { S: '传说 · LEGEND', A: '宗师 · MASTER', B: '精英 · ELITE', C: '行者 · RUNNER', D: '新兵 · ROOKIE' };
@@ -1184,7 +1229,8 @@ function calcRank() {
   const bars = (G.mode === 'boss' || G.mode === 'brb') ? [25000, 16000, 10000, 5000]
     : G.mode === 'graze' ? [45000, 28000, 16000, 7000]
     : G.mode === 'versus' || G.mode === 'ghost' ? [8000, 5000, 3000, 1500]
-    : G.mode === 'daily' ? [70000, 46000, 28000, 13000]
+    // 种子对决沿用每日线：同为 ×2 词条卷，且不与其他形态直接比较
+    : G.mode === 'daily' || G.mode === 'duel' ? [70000, 46000, 28000, 13000]
     : (G.mode === 'classic' ? [30000, 20000, 12000, 6000] : [60000, 40000, 25000, 12000]);
   let r = 'D';
   if (G.score >= bars[3]) r = 'C';
@@ -1214,6 +1260,19 @@ function battleReport() {
     const tb = G.daily && G.daily.rows.length ? G.daily.rows[0].s : 0;
     const stk = G.dstat && G.dstat.streak > 0 ? G.dstat.streak : 0;
     ls.push('本机今日最佳 ' + pad(tb, 7) + (stk > 0 ? ' · 连续挑战 ' + stk + ' 天' : ''));
+    // [SHADOW1] 召唤昨日之影的对局：战报对比两日得分
+    if (G.shadowRun && G.shadowRef) {
+      const dl = Math.floor(G.score) - G.shadowRef.sc;
+      ls.push('昨日之影 ' + pad(G.shadowRef.sc, 7) + ' → 今日 ' + pad(Math.floor(G.score), 7) + (dl > 0 ? ' (+' + dl + ')' : dl < 0 ? ' (' + dl + ')' : ' (持平)'));
+    }
+  }
+  if (G.mode === 'duel' && G.duelRun) {
+    const dstr = G.duelRun.lv.map((lv, i) => UPGRADES[i] && lv > 0 ? UPGRADES[i].n + lv : '').filter(Boolean).join('/');
+    ls.push('对决种子 ' + duelSeedText(G.duelRun.seed) + ' · 波次上限 ' + G.duelRun.cap + ' · 初始构筑 ' + (dstr || '空手'));
+    const drec = duelRecordFor(G.duelRun.seed);
+    if (drec && drec.opp) {
+      ls.push('对手成绩 ' + pad(drec.opp.s, 7) + ' → ' + (drec.res === 'w' ? '你赢了!' : drec.res === 'l' ? '你输了' : drec.res === 't' ? '平分' : '待判定'));
+    }
   }
   if (G.mode === 'classic' || G.mode === 'boss') {
     let t2 = '⏱ 用时 ' + fmtTime(G.rt);
@@ -1438,6 +1497,273 @@ function loadRush() {
     G.rush = rushValid(r) ? r : null;
   } catch (e) { G.rush = null; }
 }
+
+/* ================= 种子对决 duel code ================= */
+// 悬赏码家族新成员：#duel=（对决码）/ #duelres=（成绩码），与 #bounty= / #rush= 相互独立。
+// 对决码 v1 布局（21 字节）：[ver=1, seed u32×4, 14×初始卡等级, 波次上限 u8, XOR校验] → 28 字符 base64url。
+//   seed 任意 32 位（构建器「今日日期」档即 dailySeed() 的输出）——同码播种 RSTATE 后同布局同词条同升级序列。
+//   卡等级沿用悬赏码 v3 的 14 卡位（UPGRADES 顺序，0..min(7,卡max)）。
+// 成绩码 v1 布局（26 字节）：[ver=1, seed u32×4, cap u8, 14×卡等级, 得分 u24, 波次 u8, 标志位, XOR校验] → 35 字符。
+//   标志位：bit0=通关(打满上限)；bit2-4=评级序号（0..4 → SABCD）。码内带 cap/构筑 → 对手没打过也能直接迎战。
+const DUEL_VER = 1;
+const DUEL_CAPS = [5, 10, 15, 20];
+const RKN = 'SABCD';
+function duelSeedText(seed) { return '#' + String((seed >>> 0).toString(16).toUpperCase()).padStart(8, '0'); }
+function duelPack(d) {
+  const NC = UPGRADES.length;
+  const b = new Array(1 + 4 + NC + 1 + 1).fill(0); // ver + seed4 + 卡 + cap + XOR
+  b[0] = DUEL_VER;
+  const sd = (d && Number.isFinite(d.seed) ? d.seed : 0) >>> 0;
+  b[1] = (sd >>> 24) & 255; b[2] = (sd >>> 16) & 255; b[3] = (sd >>> 8) & 255; b[4] = sd & 255;
+  for (let i = 0; i < NC; i++) {
+    const u = UPGRADES[i];
+    b[5 + i] = CL(Math.floor((d && d.lv && d.lv[i]) || 0), 0, u ? Math.min(7, u.max) : 7);
+  }
+  b[5 + NC] = CL(Math.floor((d && d.cap) || 10), 1, 99);
+  let x = 0;
+  for (let i = 0; i < b.length - 1; i++) x ^= b[i];
+  b[b.length - 1] = x;
+  return b64uEnc(b);
+}
+function duelUnpack(code) {
+  // 字符数校验：base64 解码会丢弃尾部不满 8 位的余数，尾部拼 junk 的码在这里先被拒
+  const s0 = String(code || '').replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
+  const b = b64uDec(s0);
+  const NC = UPGRADES.length;
+  if (!b || b.length !== 5 + NC + 2 || b[0] !== DUEL_VER) return null;
+  if (s0.length !== Math.ceil(b.length * 8 / 6)) return null;
+  let x = 0;
+  for (let i = 0; i < b.length - 1; i++) x ^= b[i];
+  if (x !== b[b.length - 1]) return null;
+  const seed = ((b[1] << 24) | (b[2] << 16) | (b[3] << 8) | b[4]) >>> 0;
+  const lv = [];
+  for (let i = 0; i < NC; i++) lv.push(CL(b[5 + i], 0, UPGRADES[i] ? Math.min(7, UPGRADES[i].max) : 7));
+  return { seed, lv, cap: CL(b[5 + NC], 1, 99) };
+}
+function duelURL(code) {
+  try { return location.href.split('#')[0] + '#duel=' + code; }
+  catch (e) { return '#duel=' + code; }
+}
+function parseHashDuel() {
+  let h = '';
+  try { h = String(location.hash || ''); } catch (e) { return null; }
+  const m = h.match(/^#duel=([A-Za-z0-9\-_]+)$/);
+  return m ? duelUnpack(m[1]) : null;
+}
+function duelScorePack(d) {
+  const NC = UPGRADES.length;
+  const b = new Array(1 + 4 + 1 + NC + 3 + 1 + 1 + 1).fill(0); // ver + seed4 + cap + 卡 + 得分3 + 波次 + 标志 + XOR
+  b[0] = DUEL_VER;
+  const sd = (d && Number.isFinite(d.seed) ? d.seed : 0) >>> 0;
+  b[1] = (sd >>> 24) & 255; b[2] = (sd >>> 16) & 255; b[3] = (sd >>> 8) & 255; b[4] = sd & 255;
+  b[5] = CL(Math.floor((d && d.cap) || 10), 1, 99);
+  for (let i = 0; i < NC; i++) {
+    const u = UPGRADES[i];
+    b[6 + i] = CL(Math.floor((d && d.lv && d.lv[i]) || 0), 0, u ? Math.min(7, u.max) : 7);
+  }
+  let o = 6 + NC;
+  const s = CL(Math.floor((d && d.score) || 0), 0, 16777215);
+  b[o] = (s >> 16) & 255; b[o + 1] = (s >> 8) & 255; b[o + 2] = s & 255;
+  b[o + 3] = CL(Math.floor((d && d.wave) || 0), 0, 255);
+  let fl = 0;
+  if (d && d.won) fl |= 1;
+  const ri = RKN.indexOf((d && d.rank) || 'D');
+  fl |= ((ri >= 0 ? ri : 4) & 7) << 2;
+  b[o + 4] = fl;
+  let x = 0;
+  for (let i = 0; i < b.length - 1; i++) x ^= b[i];
+  b[b.length - 1] = x;
+  return b64uEnc(b);
+}
+function duelScoreUnpack(code) {
+  const s0 = String(code || '').replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
+  const b = b64uDec(s0);
+  const NC = UPGRADES.length;
+  if (!b || b.length !== 9 + NC + 3 || b[0] !== DUEL_VER) return null;
+  if (s0.length !== Math.ceil(b.length * 8 / 6)) return null;
+  let x = 0;
+  for (let i = 0; i < b.length - 1; i++) x ^= b[i];
+  if (x !== b[b.length - 1]) return null;
+  const seed = ((b[1] << 24) | (b[2] << 16) | (b[3] << 8) | b[4]) >>> 0;
+  const lv = [];
+  for (let i = 0; i < NC; i++) lv.push(CL(b[6 + i], 0, UPGRADES[i] ? Math.min(7, UPGRADES[i].max) : 7));
+  const o = 6 + NC; // 得分 u24 起点（ver1+seed4+cap1+卡14 之后）
+  const fl = b[o + 4];
+  return {
+    seed, lv, cap: CL(b[5], 1, 99),
+    score: (b[o] << 16) | (b[o + 1] << 8) | b[o + 2],
+    wave: b[o + 3],
+    won: !!(fl & 1),
+    rank: RKN[(fl >> 2) & 7] || 'D'
+  };
+}
+function duelScoreURL(code) {
+  try { return location.href.split('#')[0] + '#duelres=' + code; }
+  catch (e) { return '#duelres=' + code; }
+}
+function parseHashDuelRes() {
+  let h = '';
+  try { h = String(location.hash || ''); } catch (e) { return null; }
+  const m = h.match(/^#duelres=([A-Za-z0-9\-_]+)$/);
+  return m ? duelScoreUnpack(m[1]) : null;
+}
+function duelFromRun() {
+  if (!G.duelRun) return null;
+  return {
+    seed: G.duelRun.seed,
+    lv: UPGRADES.map((u, i) => CL(Math.floor(G.duelRun.lv[i] || 0), 0, Math.min(7, u.max))),
+    cap: G.duelRun.cap,
+    score: Math.floor(G.score),
+    wave: G.wave,
+    won: !!G.won,
+    rank: G.rank || 'D'
+  };
+}
+// 成绩码复制（结算页按 D / 点按钮）：码内含 seed/cap/构筑/得分/波次/评级，对手开链接即判胜负
+function copyDuelScoreURL() {
+  const r = duelFromRun();
+  if (!r) { addText(W / 2, H * 0.78, '此局无法生成成绩码', '#ff8866', 14); return; }
+  copyText(duelScoreURL(duelScorePack(r)), ok => addText(W / 2, H * 0.78,
+    ok ? '✓ 成绩码已复制 · 回贴给对手，各自打开对方成绩码即判胜负' : '复制失败 · 成绩码 ' + duelScorePack(r),
+    ok ? '#ffce9a' : '#ff6688', 14));
+  uiClick();
+}
+/* [DUEL2] 对决史（本机留存）：同一 seed 一条记录，me=我方成绩 / opp=对手成绩 / res=w|l|t|''。
+   坏档自愈同 [FIX-DATA1]：形状不对的行整行丢弃，绝不抛错打断启动。 */
+function sanitizeDuels(raw) {
+  let arr = null;
+  try { arr = JSON.parse(raw || 'null'); } catch (e) { arr = null; }
+  if (!Array.isArray(arr)) arr = [];
+  const out = [];
+  for (const d0 of arr) {
+    if (!d0 || typeof d0 !== 'object' || !Number.isFinite(d0.seed)) continue;
+    const d = {
+      seed: d0.seed >>> 0,
+      cap: CL(Math.floor(+d0.cap || 10), 1, 99),
+      deck: Array.isArray(d0.deck) ? d0.deck.slice(0, UPGRADES.length).map(v => CL(Math.floor(+v || 0), 0, 7)) : [],
+      me: null, opp: null, res: '', t: +d0.t || 0
+    };
+    const side = r => (r && typeof r === 'object' && Number.isFinite(r.s))
+      ? { s: Math.floor(r.s), w: CL(Math.floor(+r.w || 0), 0, 255), win: !!r.win, r: RKN.indexOf(r.r) >= 0 ? r.r : 'D' } : null;
+    d.me = side(d0.me); d.opp = side(d0.opp);
+    d.res = d0.res === 'w' || d0.res === 'l' || d0.res === 't' ? d0.res : '';
+    out.push(d);
+  }
+  return out.slice(0, 12);
+}
+function loadDuels() {
+  G.duels = sanitizeDuels(localStorage.getItem('neonvoid_duels'));
+}
+function saveDuels() {
+  try { localStorage.setItem('neonvoid_duels', JSON.stringify(G.duels)); } catch (e) {}
+}
+function duelRecordFor(seed) {
+  return G.duels.find(d => d.seed === (seed >>> 0)) || null;
+}
+// 我方对决成绩入档（recordScore 的 duel 分支调用；同 seed 覆盖我方成绩，保留已有对手判定）
+function duelRecordRun() {
+  if (!G.duelRun) return;
+  loadDuels();
+  let rec = duelRecordFor(G.duelRun.seed);
+  if (!rec) {
+    rec = { seed: G.duelRun.seed >>> 0, cap: G.duelRun.cap, deck: G.duelRun.lv.slice(0, UPGRADES.length), me: null, opp: null, res: '', t: Date.now() };
+    G.duels.unshift(rec);
+  }
+  rec.cap = G.duelRun.cap;
+  rec.deck = G.duelRun.lv.slice(0, UPGRADES.length);
+  rec.me = { s: Math.floor(G.score), w: G.wave, win: !!G.won, r: G.rank || 'D' };
+  rec.t = Date.now();
+  if (rec.me.s > 0 && rec.opp && rec.opp.s > 0) judgeDuel(rec);
+  G.duels = sanitizeDuels(JSON.stringify(G.duels));
+  saveDuels();
+}
+// 成绩码对决判定：对手成绩对上本地同 seed 记录 → 写 opp/res，我方胜解锁「对决制胜」
+function judgeDuel(rec) {
+  if (!rec || !rec.me || !rec.opp) return rec ? rec.res : '';
+  rec.res = rec.me.s > rec.opp.s ? 'w' : rec.me.s < rec.opp.s ? 'l' : 't';
+  if (rec.res === 'w') unlock('duelwin');
+  return rec.res;
+}
+// 对手成绩码到达：有本机记录 → 合并判定；没有 → 建档待战（成绩码自带 cap/构筑，可直接迎战）
+function applyDuelRes(r) {
+  loadDuels();
+  let rec = duelRecordFor(r.seed);
+  const opp = { s: r.score, w: r.wave, win: r.won, r: r.rank };
+  if (!rec) {
+    rec = { seed: r.seed >>> 0, cap: r.cap, deck: r.lv.slice(0, UPGRADES.length), me: null, opp, res: '', t: Date.now() };
+    G.duels.unshift(rec);
+  } else {
+    rec.opp = opp; rec.cap = r.cap; rec.deck = r.lv.slice(0, UPGRADES.length);
+  }
+  if (rec.me && rec.me.s > 0) judgeDuel(rec);
+  G.duels = sanitizeDuels(JSON.stringify(G.duels));
+  saveDuels();
+  return rec;
+}
+
+/* ================= 昨日之影 shadow echo ================= */
+// [SHADOW1] 每日挑战每 0.5s 采样一次（飞船 x/y + 动作位），按日期存本机，保留最近 7 天（环形覆盖）。
+// 纯表现数据：采样只读状态不触碰 RSTATE；回放按索引取样绘制，随机抖动走 Math.random 表现通道。
+// 存储格式 neonvoid_shadow = { v:1, days:{ 'YYYY-MM-DD': { sc, w, s:[x0,y0,f0, x1,y1,f1, ...] } } }
+const SHADOW_DAYS = 7;
+const SHADOW_MAXSamples = 4800; // 40 分钟 × 2 样/秒，防超长局撑爆 localStorage
+const SH_ACT = { bomb: 1, dash: 2, rift: 4, od: 8, ultra: 16 };
+function shadowDate(offset) {
+  const d = new Date();
+  d.setDate(d.getDate() + (offset || 0));
+  return d.getFullYear() + '-' + pad(d.getMonth() + 1, 2) + '-' + pad(d.getDate(), 2);
+}
+function sanitizeShadow(raw) {
+  let o = null;
+  try { o = JSON.parse(raw || 'null'); } catch (e) { o = null; }
+  const days = {};
+  if (o && typeof o === 'object' && o.days && typeof o.days === 'object') {
+    for (const k in o.days) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(k)) continue;
+      const e = o.days[k];
+      if (!e || typeof e !== 'object' || !Array.isArray(e.s) || e.s.length < 3) continue;
+      const s = [];
+      let ok = true;
+      for (let i = 0; i < e.s.length && s.length < SHADOW_MAXSamples * 3; i++) {
+        const v = +e.s[i];
+        if (!isFinite(v)) { ok = false; break; }
+        s.push(i % 3 === 2 ? (CL(v, 0, 255) | 0) : CL(Math.round(v), 0, 4095));
+      }
+      if (!ok || s.length < 3) continue;
+      days[k] = { sc: Math.max(0, Math.floor(+e.sc || 0)), w: Math.max(0, Math.floor(+e.w || 0)), s };
+    }
+  }
+  // 环形覆盖：只保留最近 7 天（日期串零填充，字典序=时间序）
+  const keys = Object.keys(days).sort().slice(-SHADOW_DAYS);
+  const out = { v: 1, days: {} };
+  for (const k of keys) out.days[k] = days[k];
+  return out;
+}
+function loadShadow() {
+  G.shadow = sanitizeShadow(localStorage.getItem('neonvoid_shadow'));
+}
+function saveShadow() {
+  try { localStorage.setItem('neonvoid_shadow', JSON.stringify(G.shadow)); } catch (e) {}
+}
+function shadowYesterday() {
+  if (!G.shadow || typeof G.shadow !== 'object') loadShadow();
+  const e = G.shadow.days && G.shadow.days[shadowDate(-1)];
+  return (e && Array.isArray(e.s) && e.s.length >= 3) ? e : null;
+}
+// 对局结束（recordScore daily 分支）落盘：同日取更高分那一局的采样（昨日之影=当日最强走位）
+function shadowSaveRun() {
+  if (!G.shSamp || G.shSamp.length < 6) return;
+  if (!G.shadow || typeof G.shadow !== 'object') loadShadow();
+  const today = shadowDate(0);
+  const cur = G.shadow.days[today];
+  if (cur && cur.sc > Math.floor(G.score)) return; // 已有更高分的当日采样，保留
+  G.shadow.days[today] = { sc: Math.floor(G.score), w: G.wave, s: G.shSamp.slice(0, SHADOW_MAXSamples * 3) };
+  G.shadow = sanitizeShadow(JSON.stringify(G.shadow));
+  saveShadow();
+}
+function shadowAction(bit) {
+  if (G.mode === 'daily' && G.shSamp) G.shAct |= bit;
+}
 function dismissGhost() {
   G.ghost = null;
   clearBountyHash();
@@ -1637,18 +1963,20 @@ function shareAutopsy() {
 function overBtns() {
   if (!(G.state === 'over' && G.over > 0.7)) return [];
   const items = [];
+  if (G.mode === 'duel' && G.duelRun) items.push({ k: 'duelscore', l: '⚔ 成绩码 · D', c: '#ff9a3c' });
   if (canIssueBounty()) items.push({ k: 'bounty', l: '☠ 悬赏码 · B', c: '#8affd4' });
   items.push({ k: 'share', l: '分享海报', c: '#ff7ad9' });
   items.push({ k: 'paper', l: '存海报 · V', c: '#4de3ff' });
   items.push({ k: 'report', l: '复制战报 · C', c: '#7d95b8' });
-  const bw = Math.min(150, (W - 30) / 4 - 8), bh = 32, gap = 8;
+  const bw = Math.min(150, (W - 30) / items.length - 8), bh = 32, gap = 8;
   const total = items.length * bw + (items.length - 1) * gap;
   const x0 = W / 2 - total / 2, y = Math.min(H - 42 - SAFE.b, H * 0.87 + 42);
   items.forEach((it, i) => { it.x = x0 + i * (bw + gap); it.y = y; it.w = bw; it.h = bh; });
   return items;
 }
 function overAct(k) {
-  if (k === 'bounty') copyBountyURL();
+  if (k === 'duelscore') copyDuelScoreURL();
+  else if (k === 'bounty') copyBountyURL();
   else if (k === 'paper') downloadAutopsy();
   else if (k === 'share') shareAutopsy();
   else if (k === 'report') copyText(battleReport(), ok => addText(W / 2, H * 0.78, ok ? '✓ 战报已复制到剪贴板' : '复制失败，请手动截图', ok ? '#3dff9e' : '#ff6688', 15));
@@ -1660,9 +1988,9 @@ function winGame() {
   G.cleared = true; G.inter = 999;
   slowmo(0.3, 1.2);
   ebullets.length = 0; mines.length = 0; marks.length = 0; G.waveQueue = [];
-  banner((G.mode === 'boss' || G.mode === 'brb') ? '全灭达成' : G.mode === 'versus' ? 'P1 获胜' : G.mode === 'ghost' ? '残影讨伐' : '战役通关',
-    G.mode === 'boss' ? 'ALL BOSSES DOWN' : G.mode === 'brb' ? 'CUSTOM RUSH CLEAR · 自定义连战达成' : G.mode === 'versus' ? 'SHIP WINS · VERSUS' : G.mode === 'ghost' ? 'GHOST SLAIN · 击杀链 +' + ((G.ghost ? G.ghost.chain : 0) + 1) : 'SECTOR CLEARED',
-    G.mode === 'versus' ? '#4de3ff' : G.mode === 'ghost' ? '#8affd4' : '#ffc233');
+  banner((G.mode === 'boss' || G.mode === 'brb') ? '全灭达成' : G.mode === 'versus' ? 'P1 获胜' : G.mode === 'ghost' ? '残影讨伐' : G.mode === 'duel' ? '对决完成' : '战役通关',
+    G.mode === 'boss' ? 'ALL BOSSES DOWN' : G.mode === 'brb' ? 'CUSTOM RUSH CLEAR · 自定义连战达成' : G.mode === 'versus' ? 'SHIP WINS · VERSUS' : G.mode === 'ghost' ? 'GHOST SLAIN · 击杀链 +' + ((G.ghost ? G.ghost.chain : 0) + 1) : G.mode === 'duel' ? 'DUEL COMPLETE · 打满 ' + (G.duelRun ? G.duelRun.cap : G.wave) + ' 波' : 'SECTOR CLEARED',
+    G.mode === 'versus' ? '#4de3ff' : G.mode === 'ghost' ? '#8affd4' : G.mode === 'duel' ? '#ff9a3c' : '#ffc233');
   if (G.mode === 'classic') unlock('win');
   else if (G.mode === 'boss') unlock('rush');
   if (G.mode === 'classic' || G.mode === 'boss') {
@@ -1937,6 +2265,7 @@ function hurtShip(p) {
 function tryDash(tp) {
   const p = tp || player;
   if (G.state !== 'playing' || p.dashCd > 0) return;
+  if (!tp || tp === player) shadowAction(SH_ACT.dash); // 只记 P1 的动作（影回放的是 P1 走位）
   let ix = p.ix, iy = p.iy;
   if (!ix && !iy) { ix = Math.cos(p.a); iy = Math.sin(p.a); }
   p.dashA = Math.atan2(iy, ix);
@@ -1955,6 +2284,7 @@ function useBomb() {
   if (G.state !== 'playing' || G.bombs <= 0) return;
   G.bombs--;
   G.bombsUsed++;
+  shadowAction(SH_ACT.bomb);
   sfxBomb();
   G.flash = 0.75; G.shake = 18;
   slowmo(0.3, 0.5);
@@ -1985,6 +2315,7 @@ function useBomb() {
 function castRift() {
   if (G.state !== 'playing' || G.riftCd > 0) return;
   G.riftCd = 25; G.riftT = 3.5;
+  shadowAction(SH_ACT.rift);
   sfxRift();
   G.chroma = Math.max(G.chroma, 0.55);
   parts.push({ type: 2, x: player.x, y: player.y, vx: 0, vy: 0, rad: 10, vr: 1100, life: 0.6, ml: 0.6, c: '#4d8cff', sz: 3, drag: 0 });
@@ -1993,6 +2324,7 @@ function castRift() {
 function castOD() {
   if (G.state !== 'playing' || G.odCd > 0) return;
   G.odCd = 30; G.odT = 5;
+  shadowAction(SH_ACT.od);
   sfxOD();
   G.chroma = Math.max(G.chroma, 0.6);
   boom(player.x, player.y, '#ffc233', 26, 7);
@@ -2001,6 +2333,7 @@ function castOD() {
 function castUltra() {
   if (G.state !== 'playing' || G.sgT > 0 || G.ultra < 100) return;
   G.ultra = 0; G.ultraCasts++;
+  shadowAction(SH_ACT.ultra);
   if (G.ultraCasts >= 3) unlock('ultra3');
   G.sgT = 3.2; G.sgX = player.x; G.sgY = player.y; G.sgKills = 0;
   slowmo(0.7, 3.0);
@@ -2741,6 +3074,8 @@ function waveLogic(dt) {
       G.inter -= dt;
       if (G.inter <= 0) {
         G.cleared = false;
+        // 种子对决：打满波次上限即对决完成（双方同卷同长度，成绩码比总分定胜负）
+        if (G.mode === 'duel' && G.duelRun && G.wave >= G.duelRun.cap) { winGame(); return; }
         if (CFG.wgate) { G.pendingWave = G.wave + 1; G.state = 'wgate'; }
         else startWave(G.wave + 1);
       }
@@ -2782,6 +3117,17 @@ function update(dt) {
     for (let i = 0; i < ebullets.length && i < 40; i++) snap.push(Math.round(ebullets[i].x), Math.round(ebullets[i].y));
     rc.eb.push(snap);
     if (rc.px.length > 80) { rc.px.shift(); rc.py.shift(); rc.bx.shift(); rc.by.shift(); rc.eb.shift(); }
+  }
+  // [SHADOW1] 昨日之影采样：每日挑战每 0.5s 记录飞船位置+动作位。纯表现数据——只读状态、
+  // 不调 rnd()/RSTATE，落盘在 recordScore 时进行，绝不影响「同日同卷」的确定性管线
+  if (G.mode === 'daily' && CFG.shadow && G.shSamp && G.shSamp.length < SHADOW_MAXSamples * 3) {
+    G.shT += dt;
+    while (G.shT >= 0.5) {
+      G.shT -= 0.5;
+      G.shSamp.push(CL(Math.round(player.x), 0, 4095), CL(Math.round(player.y), 0, 4095), G.shAct & 255);
+      G.shAct = 0;
+      if (G.shSamp.length >= SHADOW_MAXSamples * 3) break;
+    }
   }
   // 永恒之镜：护盾自动重建
   if (hasMut('mirror') && evo('mirror') && !G.shield && G.state === 'playing') {
@@ -3343,6 +3689,58 @@ function drawGhosts() {
     ctx.restore();
   }
 }
+/* [SHADOW1] 昨日之影：半透明薄荷色残影按昨日采样回放走位。
+   纯视觉：无碰撞、不可交互、不进任何玩法数组、不消耗 RSTATE——脉冲/抖动只用 G.time 与 Math.random 表现通道。 */
+function drawShadowGhost() {
+  const sd = G.shadowRef;
+  if (!sd || !sd.s || sd.s.length < 3) return;
+  const n = Math.floor(sd.s.length / 3);
+  const i = Math.min(n - 1, Math.floor(G.runT / 0.5));
+  const x = CL(sd.s[i * 3], 8, W - 8), y = CL(sd.s[i * 3 + 1], 8, H - 8);
+  const f = sd.s[i * 3 + 2] || 0;
+  const tail = Math.max(0, G.runT - (n - 1) * 0.5); // 回放走完 → 3 秒淡出
+  const fade = tail > 0 ? Math.max(0, 1 - tail / 3) : 1;
+  if (fade <= 0) return;
+  ctx.save();
+  // 薄荷拖尾：最近 12 个采样连线渐隐
+  ctx.strokeStyle = '#8affd4';
+  for (let t = Math.max(1, i - 11); t <= i; t++) {
+    const k = (t - Math.max(1, i - 11)) / 11;
+    ctx.globalAlpha = (0.04 + 0.14 * k) * fade;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(CL(sd.s[(t - 1) * 3], 8, W - 8), CL(sd.s[(t - 1) * 3 + 1], 8, H - 8));
+    ctx.lineTo(CL(sd.s[t * 3], 8, W - 8), CL(sd.s[t * 3 + 1], 8, H - 8));
+    ctx.stroke();
+  }
+  // 残影船体：朝向取相邻采样连线方向
+  const j = Math.min(n - 1, i + 1);
+  const nx = CL(sd.s[j * 3], 8, W - 8), ny = CL(sd.s[j * 3 + 1], 8, H - 8);
+  const ang = (Math.abs(nx - x) + Math.abs(ny - y)) > 2 ? Math.atan2(ny - y, nx - x) : 0;
+  ctx.translate(x, y); ctx.rotate(ang);
+  ctx.globalAlpha = (0.30 + 0.10 * Math.sin(G.time * 4)) * fade;
+  ctx.strokeStyle = '#8affd4'; ctx.lineWidth = 2;
+  playerHull(); ctx.stroke();
+  ctx.globalAlpha = 0.55 * fade;
+  ctx.fillStyle = '#c9ffe9';
+  ctx.beginPath(); ctx.moveTo(9, 0); ctx.lineTo(3, 2.4); ctx.lineTo(1, 0); ctx.lineTo(3, -2.4); ctx.closePath(); ctx.fill();
+  ctx.rotate(-ang);
+  // 关键动作标记：炸弹=扩散环，技能=船体上方小 glyph（纯表现）
+  if (f & SH_ACT.bomb) {
+    const ph = (G.runT * 2) % 1;
+    ctx.globalAlpha = (1 - ph) * 0.5 * fade;
+    ctx.strokeStyle = '#ffe233'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(x, y, 14 + ph * 60, 0, TAU); ctx.stroke();
+  } else if (f) {
+    const gl = (f & SH_ACT.dash ? '»' : '') + (f & SH_ACT.rift ? '◇' : '') + (f & SH_ACT.od ? '⚡' : '') + (f & SH_ACT.ultra ? '✦' : '');
+    ctx.globalAlpha = 0.8 * fade;
+    txt(gl, x, y - 24 + Math.sin(G.time * 7) * 1.5, 11, '#c9ffe9', 'center', 800);
+  }
+  ctx.globalAlpha = 0.4 * fade;
+  txt('昨日之影', x, y + 24, 9, 'rgba(138,255,212,.9)', 'center', 600, true);
+  ctx.restore();
+  ctx.globalAlpha = 1;
+}
 function drawShip(p, pal) {
   if (G.state === 'over') return;
   const blink = p.inv > 0 && Math.sin(G.time * 30) > 0;
@@ -3513,7 +3911,7 @@ function drawHUD() {
     // 擦弹专精没有词条栏，这里挂总擦弹/本波擦弹计数
     txt('擦弹 ' + G.grazes + ' · 本波 ' + (G.waveGrz || 0), hl, 128 + vt, 11, 'rgba(234,255,106,.9)', 'left', 700, true);
   }
-  const wt = G.mode === 'boss' ? 'BOSS · 连战' : G.mode === 'brb' ? 'RUSH · 自定义连战' : G.mode === 'versus' ? 'VERSUS · 对决' : G.mode === 'ghost' ? 'GHOST · 残影悬赏' : G.mode === 'graze' ? 'GRAZE · 擦弹专精' : G.mode === 'endless' ? 'WAVE · 无尽' : G.mode === 'chaos' ? 'WAVE · 混沌 ×2' : G.mode === 'daily' ? 'DAILY · 每日 ×2' : 'WAVE · 波次';
+  const wt = G.mode === 'boss' ? 'BOSS · 连战' : G.mode === 'brb' ? 'RUSH · 自定义连战' : G.mode === 'versus' ? 'VERSUS · 对决' : G.mode === 'ghost' ? 'GHOST · 残影悬赏' : G.mode === 'graze' ? 'GRAZE · 擦弹专精' : G.mode === 'endless' ? 'WAVE · 无尽' : G.mode === 'chaos' ? 'WAVE · 混沌 ×2' : G.mode === 'daily' ? 'DAILY · 每日 ×2' : G.mode === 'duel' ? 'DUEL · 种子对决 ×2' : 'WAVE · 波次';
   txt(wt + (G.abyss ? ' · ⛩回廊' : '') + (G.coop ? ' · 双人' : ''), W - 16 - hr, 20 + vt, 11, G.abyss ? 'rgba(255,120,140,.85)' : G.mode === 'graze' ? 'rgba(200,255,140,.8)' : 'rgba(130,170,230,.75)', 'right', 600, true);
   ctx.shadowColor = '#4de3ff'; ctx.shadowBlur = 14;
   const vsHP = G.mode === 'versus' || G.mode === 'ghost';
@@ -3873,8 +4271,9 @@ function drawOverlay() {
     ctx.fillRect(0, 0, W, H);
     // [FIX-COS1] 指南/关于两页有自己的页眉与正文，大 logo 常驻绘制会压住正文 → 这两页不再绘制；
     // 同时矮视口（横屏手机）按高度收紧 logo，避免副标题/下划线压住下方提示与按钮。
-    // 连战构建器（brb）有自己的整页 UI，同样跳过 logo。
-    if (G.tStage !== 'guide' && G.tStage !== 'credits' && G.tStage !== 'brb') {
+    // 连战构建器（brb）与种子对决（duel/duelres）有自己的整页 UI，同样跳过 logo。
+    if (G.tStage !== 'guide' && G.tStage !== 'credits' && G.tStage !== 'brb' &&
+        G.tStage !== 'duel' && G.tStage !== 'duelres') {
       const ts = Math.min(62, W * 0.105, H * 0.10);
       const ty = H * 0.30;
       const gl = (G.time % 2.8) < 0.13;
@@ -3923,15 +4322,27 @@ function drawOverlay() {
       txt('—— 游戏指南 · GUIDE ——', cx, H * 0.075, 14, '#4de3ff', 'center', 800);
       ctx.shadowBlur = 0;
       const pg = GUIDE[G.gp] || GUIDE[0];
-      let gy = H * 0.225;
-      for (const ln2 of pg.lines) {
+      // [FIX-COS11] 矮视口自适应：新形态指南扩到 10 行后 844×390 固定 34px 行距放不下（末行被返回按钮裁切）。
+      // 先按当前字号量出每行折行数，用「可用高度 / 总行数」收行距（下限 16px），必要时降字号减少折行。
+      const gC = H < 560;
+      const gfs = gC ? 11.5 : 13.5;
+      const gMaxW = W * (gC ? 0.86 : 0.78);
+      const gy0 = Math.max(H * (gC ? 0.20 : 0.225), H * 0.115 + 40); // 首行不与章节 chip 行（H*0.115+30）相接
+      const gLim = Math.min(H * 0.90, H - 48 - SAFE.b) - 10;
+      ctx.font = '500 ' + gfs + 'px ' + FONT;
+      const gCnt = pg.lines.map(ln2 => Math.max(1, Math.ceil(ctx.measureText(ln2).width / gMaxW)));
+      const gRows = gCnt.reduce((a2, b3) => a2 + b3, 0);
+      const gPitch = CL((gLim - gy0) / Math.max(1, gRows), 16, 34);
+      let gy = gy0;
+      pg.lines.forEach((ln2, gi) => {
+        const rn = gCnt[gi];
         ctx.globalAlpha = 0.1;
         ctx.fillStyle = '#4de3ff';
-        ctx.fillRect(cx - W * 0.41, gy - 11, W * 0.82, 22);
+        ctx.fillRect(cx - W * (gC ? 0.44 : 0.41), gy - 11, W * (gC ? 0.88 : 0.82), rn * (gfs + 5) + 6);
         ctx.globalAlpha = 1;
-        wrapTxt(ln2, cx, gy, W * 0.78, 13.5, 'rgba(215,235,252,.92)');
-        gy += 34;
-      }
+        wrapTxt(ln2, cx, gy, gMaxW, gfs, 'rgba(215,235,252,.92)');
+        gy += gPitch * rn;
+      });
       // [FIX-COS3] 矮视口下提示行上移，避开 H-38 处的「ESC · 返回」按钮
       txt('按 1-' + GUIDE.length + ' 切换章节 · ESC 返回 · 开局前随时查阅', cx, Math.min(H * 0.90, H - 52), 11, 'rgba(140,180,220,.6)', 'center', 600);
     } else if (G.tStage === 'set') {
@@ -3955,20 +4366,21 @@ function drawOverlay() {
       ctx.shadowBlur = 0;
       const cl = [
         ['NEON VOID · 霓虹虚空', 22, '#eaf6ff', 800],
-        ['v1.4.0 · 单文件 · 零依赖 · ~250KB', 12, 'rgba(170,200,235,.8)', 600],
+        ['v1.5.0 · 单文件 · 零依赖 · ~260KB', 12, 'rgba(170,200,235,.8)', 600],
         ['v1.0.2 修复：无尽模式高波次白屏 · 超频射控失效 · 屏幕外残敌卡波', 11, 'rgba(120,230,190,.85)', 600],
         ['v1.0.3 平衡：高波次难度曲线（数量↑ / 血量封顶）· 帧循环微调', 11, 'rgba(120,230,190,.85)', 600],
         ['v1.1.0 扩充：奇点之瞳降临 · 双螺旋/镜面折返弹幕 · 超导闪现/虚空结晶/擦弹领域', 11, 'rgba(120,230,190,.85)', 600],
         ['v1.2.0 扩充：新星爆发弹幕 · 死亡绽放/共鸣核心 · 深渊回廊（无尽 30 波+）· 悬赏码 v3', 11, 'rgba(120,230,190,.85)', 600],
         ['v1.3.0 扩充：擦弹专精（开火封印 · 擦弹即得分）· 连战构建器（自选菜单 · #rush 分享码）', 11, 'rgba(120,230,190,.85)', 600],
         ['v1.4.0 扩充：每日挑战留存（本机最佳/连续天数）· 画质自适应 L0-L2（低端机兜底）', 11, 'rgba(120,230,190,.85)', 600],
+        ['v1.5.0 扩充：种子对决（#duel= 同码同卷 · 成绩码定胜负 · 对决史）· 昨日之影（走位回放 · 两日对比）', 11, 'rgba(120,230,190,.85)', 600],
         ['', 10, '', 400],
         ['设计 · 代码 · 美术 · 音乐', 14, '#dfeeff', 700],
         ['全部由 AI 通过 VIBECODING 创作', 14, '#ff7ad9', 700],
         ['', 10, '', 400],
         ['Canvas 2D · WebAudio 实时合成音源', 12, 'rgba(170,200,235,.8)', 500],
-        ['9 形态 · 1320 词条组合 · 6 BOSS · 35 成就 · 14 构筑卡', 12, 'rgba(170,200,235,.8)', 500],
-        ['双人同屏 · 人机对抗 · 每日同卷 · 自定义连战 · 奇点终技', 12, 'rgba(170,200,235,.8)', 500],
+        ['10 形态 · 1320 词条组合 · 6 BOSS · 36 成就 · 14 构筑卡', 12, 'rgba(170,200,235,.8)', 500],
+        ['双人同屏 · 人机对抗 · 每日同卷 · 种子对决 · 自定义连战 · 奇点终技', 12, 'rgba(170,200,235,.8)', 500],
         ['', 10, '', 400],
         ['感谢游玩 · KEEP VIBING', 16, '#3dff9e', 800]
       ];
@@ -4054,6 +4466,60 @@ function drawOverlay() {
         txt(G.rushShareMsg, cx, H * 0.72, 11.5, '#8affd4', 'center', 700);
       }
       txt('Enter 出击 · ESC 返回', cx, H - 14, 10, 'rgba(140,170,210,.45)', 'center', 500, true);
+    } else if (G.tStage === 'duel') {
+      // 种子对决：构建/确认一页两态（G.duelInv=从对决码载入的只读确认页）
+      const inv = !!(G.duelInv && G.duel);
+      const d = G.duel || { seed: 0, lv: [], cap: 10 };
+      const cardN = UPGRADES.length;
+      const lvSum = d.lv ? d.lv.reduce((a, b) => a + (b || 0), 0) : 0;
+      const gy0 = H * 0.055 + (inv ? 86 : 150); // 构筑网格顶（builder 上方多两行按钮）
+      ctx.shadowColor = '#ff9a3c'; ctx.shadowBlur = 16;
+      txt('—— 种子对决 · SEED DUEL ——', cx, H * 0.055, 14, '#ff9a3c', 'center', 800);
+      ctx.shadowBlur = 0;
+      txt(inv ? '⚡ 已从对决链接载入 · 同码同卷同词条同升级序列 · 出击即开卷'
+             : '生成你的对决码：seed/初始构筑/波次上限全部入码 · 成绩码回贴给对手定胜负',
+        cx, H * 0.055 + 20, 11, 'rgba(255,200,150,.8)', 'center', 500);
+      txt('SEED ' + duelSeedText(d.seed), cx, H * 0.055 + 46, 15, '#ffe9c2', 'center', 800, true);
+      txt(inv ? '固定种子 · 全员同卷 · 波次上限 ' + d.cap + ' 波 · 打满即对决完成'
+             : '换种子：🎲 随机 / 📅 今日日期（与每日挑战同款播种）', cx, H * 0.055 + 64, 10.5, 'rgba(200,220,250,.55)', 'center', 500);
+      if (!inv) txt('波次上限（打满即对决完成）', cx, H * 0.055 + 138, 10.5, 'rgba(255,220,180,.7)', 'center', 600);
+      txt((inv ? '对手的初始构筑' : '初始构筑（点击卡片循环等级 0→max→0）') + ' · 共 ' + lvSum + ' 级',
+        cx, gy0 - 10, 11, '#cfe8ff', 'center', 700, true);
+      // 对决史（本机最近 3 条；loadDuels 在进页/入档时刷新，渲染帧只读内存）
+      if (G.duels.length) {
+        const hy = gy0 + Math.ceil(cardN / 7) * 31 + 14;
+        txt('── 对决史 · DUEL LOG ──', cx, hy, 10.5, 'rgba(255,180,120,.6)', 'center', 600);
+        const dn3 = Math.min(3, G.duels.length);
+        for (let li = 0; li < dn3; li++) {
+          const r3 = G.duels[li];
+          const verdict = r3.res === 'w' ? '胜' : r3.res === 'l' ? '负' : r3.res === 't' ? '平' : '待对手成绩码';
+          const mine = r3.me ? pad(r3.me.s, 7) : '—还没开卷';
+          const theirs = r3.opp ? pad(r3.opp.s, 7) : '—待对手';
+          txt(duelSeedText(r3.seed) + ' · ' + r3.cap + ' 波 · 我 ' + mine + ' vs 对手 ' + theirs + ' · ' + verdict,
+            cx, hy + 15 + li * 15, 10.5, r3.res === 'w' ? '#3dff9e' : r3.res === 'l' ? '#ff6688' : 'rgba(220,200,180,.75)', 'center', 600, true);
+        }
+      }
+      if (G.duelShareMsg) txt(G.duelShareMsg, cx, H * 0.72, 11.5, '#8affd4', 'center', 700);
+    } else if (G.tStage === 'duelres') {
+      // 对决结果页：对手成绩码与本机记录对碰
+      const rv = G.duelRes;
+      ctx.shadowColor = rv && rv.res === 'w' ? '#3dff9e' : rv && rv.res === 'l' ? '#ff6688' : '#ff9a3c'; ctx.shadowBlur = 16;
+      txt('—— 对决结果 · DUEL RESULT ——', cx, H * 0.30, 14, '#ff9a3c', 'center', 800);
+      ctx.shadowBlur = 0;
+      if (rv) {
+        const big = rv.res === 'w' ? '你赢了!' : rv.res === 'l' ? '你输了' : rv.res === 't' ? '平分秋色' : '待你开卷';
+        txt(big, cx, H * 0.30 + 40, 30, rv.res === 'w' ? '#3dff9e' : rv.res === 'l' ? '#ff6688' : '#ffe9c2', 'center', 900);
+        txt('对决种子 ' + duelSeedText(rv.seed) + ' · ' + rv.cap + ' 波', cx, H * 0.30 + 74, 12.5, '#ffe9c2', 'center', 700, true);
+        if (rv.me) {
+          txt('我方 ' + pad(rv.me.s, 7) + '  ·  对手 ' + pad(rv.opp.s, 7) + '  ·  差 ' + (rv.me.s - rv.opp.s >= 0 ? '+' : '') + (rv.me.s - rv.opp.s),
+            cx, H * 0.30 + 96, 13, '#eaf6ff', 'center', 800, true);
+        } else {
+          txt('对手成绩 ' + pad(rv.opp.s, 7) + ' · 你还没有这场对决的记录', cx, H * 0.30 + 96, 12.5, 'rgba(220,230,250,.85)', 'center', 600);
+          txt('⚔ 从下方出击同一张卷，打满后把你的成绩码回贴过去', cx, H * 0.30 + 116, 11, 'rgba(200,220,250,.65)', 'center', 500);
+        }
+      } else {
+        txt('成绩码无效或已被清除', cx, H * 0.30 + 40, 13, '#ff8866', 'center', 700);
+      }
     } else {
       ctx.shadowColor = tmode.c; ctx.shadowBlur = 16;
       txt('—— ' + tmode.n + ' · ' + tmode.en + ' ——', cx, H * 0.425, 14, tmode.c, 'center', 800);
@@ -4119,18 +4585,21 @@ function drawOverlay() {
       }
     }
     if (G.tStage === 'players') {
+      // [FIX-COS9] 844×390 等矮视口：H*0.70 的 P1/P2 提示行与「ESC · 返回上一步」按钮重叠（预存在）。
+      // 提示块改为从「返回/召唤按钮底边 + 10」起画（不高于 H*0.70），矮视口整体让位，桌面几何不变。
+      const py0 = Math.max(H * 0.70, H * 0.525 + 42 + 12 + 26 + 10);
       if (G.tSel === 'versus') {
-        txt('P1  WASD + 鼠标 · 击败 BOSS · 3 条命', cx, H * 0.70, 12.5, 'rgba(160,195,235,.85)', 'center', 500);
-        txt('P2  方向键驾驶 BOSS · 数字键 1-9/0 释放招式', cx, H * 0.70 + 19, 12.5, 'rgba(255,140,190,.85)', 'center', 500);
-        txt('半血自动狂暴 · P1 擦弹可充能奇点反杀', cx, H * 0.70 + 38, 12, 'rgba(160,195,235,.6)', 'center', 500);
+        txt('P1  WASD + 鼠标 · 击败 BOSS · 3 条命', cx, py0, 12.5, 'rgba(160,195,235,.85)', 'center', 500);
+        txt('P2  方向键驾驶 BOSS · 数字键 1-9/0 释放招式', cx, py0 + 19, 12.5, 'rgba(255,140,190,.85)', 'center', 500);
+        txt('半血自动狂暴 · P1 擦弹可充能奇点反杀', cx, py0 + 38, 12, 'rgba(160,195,235,.6)', 'center', 500);
       } else if (G.tSel === 'graze') {
-        txt('开火封印 · 贴身擦过敌弹 = 得分 + 连段 + 经验', cx, H * 0.70, 12.5, 'rgba(234,255,106,.9)', 'center', 700);
-        txt('擦弹连段抬升得分倍率；敌人掠过一阵后自行撤离，别恋战', cx, H * 0.70 + 19, 12.5, 'rgba(160,195,235,.85)', 'center', 500);
-        txt('BOSS 弹幕为限时袭扰（免疫伤害）· 空格炸弹 / 奇点仍是底牌', cx, H * 0.70 + 38, 12, 'rgba(160,195,235,.6)', 'center', 500);
+        txt('开火封印 · 贴身擦过敌弹 = 得分 + 连段 + 经验', cx, py0, 12.5, 'rgba(234,255,106,.9)', 'center', 700);
+        txt('擦弹连段抬升得分倍率；敌人掠过一阵后自行撤离，别恋战', cx, py0 + 19, 12.5, 'rgba(160,195,235,.85)', 'center', 500);
+        txt('BOSS 弹幕为限时袭扰（免疫伤害）· 空格炸弹 / 奇点仍是底牌', cx, py0 + 38, 12, 'rgba(160,195,235,.6)', 'center', 500);
       } else {
-        txt('P1  WASD 移动 · 鼠标瞄准 · Shift 冲刺 · Q/E/X 技能 · 空格 炸弹', cx, H * 0.70, 12.5, 'rgba(160,195,235,.8)', 'center', 500);
-        txt('P2  方向键移动 · 自动瞄准开火 · 右 Shift 冲刺（双人模式）', cx, H * 0.70 + 19, 12.5, 'rgba(255,170,220,.8)', 'center', 500);
-        txt('击杀拾取水晶 · 升级三选一 · 构筑你的流派', cx, H * 0.70 + 38, 12, 'rgba(160,195,235,.6)', 'center', 500);
+        txt('P1  WASD 移动 · 鼠标瞄准 · Shift 冲刺 · Q/E/X 技能 · 空格 炸弹', cx, py0, 12.5, 'rgba(160,195,235,.8)', 'center', 500);
+        txt('P2  方向键移动 · 自动瞄准开火 · 右 Shift 冲刺（双人模式）', cx, py0 + 19, 12.5, 'rgba(255,170,220,.8)', 'center', 500);
+        txt('击杀拾取水晶 · 升级三选一 · 构筑你的流派', cx, py0 + 38, 12, 'rgba(160,195,235,.6)', 'center', 500);
       }
     }
     // [FIX-COS8] 榜块绘制门：成就页不画（原样）；设置页在 setGeom 判定放不下时本页隐藏，其余照旧
@@ -4145,7 +4614,8 @@ function drawOverlay() {
         }
         // [DAILY2] 标题页补本机留存摘要：历史最佳 / 连续挑战天数
         if (G.dstat && (G.dstat.best.s > 0 || G.dstat.streak > 0)) {
-          txt('本机最佳 ' + pad(G.dstat.best.s, 7) + (G.dstat.streak > 1 ? ' · 连续 ' + G.dstat.streak + ' 天' : ''),
+          // [FIX-COS10] streak≥1 都显示「连续 N 天」：原 streak=1 不显示，与结算页/战报口径（>0 就显示）不一致
+          txt('本机最佳 ' + pad(G.dstat.best.s, 7) + (G.dstat.streak >= 1 ? ' · 连续 ' + G.dstat.streak + ' 天' : ''),
             cx, H * 0.80 + 19 + dn2 * 16 + 4, 10.5, 'rgba(150,230,200,.65)', 'center', 600, true);
         }
       } else if (G.lb.length) {
@@ -4154,12 +4624,17 @@ function drawOverlay() {
       for (let li = 0; li < ln2; li++) {
         const r2 = G.lb[li];
         // [DAILY2] 每日挑战行追加 DAILY 形态标注（得分×2，不与其他形态直接比较）
-        txt((li + 1) + '  ' + (r2.r ? '[' + r2.r + '] ' : '') + pad(r2.s, 7) + '  ' + MODE_TAG[r2.m] + (r2.m === 'daily' ? '·DAILY' : '') + (r2.m === 'versus' ? ' · 命中 ' + r2.w : ' · W' + r2.w) + (r2.c ? ' · 双人' : ''),
+        txt((li + 1) + '  ' + (r2.r ? '[' + r2.r + '] ' : '') + pad(r2.s, 7) + '  ' + MODE_TAG[r2.m] + (r2.m === 'daily' ? '·DAILY' : r2.m === 'duel' ? '·DUEL' : '') + (r2.m === 'versus' ? ' · 命中 ' + r2.w : ' · W' + r2.w) + (r2.c ? ' · 双人' : ''),
           cx, H * 0.80 + 19 + li * 16, 11.5, li === 0 ? '#ffc233' : 'rgba(190,215,240,.8)', 'center', 600, true);
       }
       }
     }
-    if (G.tStage !== 'brb') txt('P 暂停 · M 静音 · A 成就 · G 指南 · S 设置 · C 关于 · B 构建器 · NEON VOID v1.4.0', cx, H - 14, 10, 'rgba(140,170,210,.4)', 'center', 500, true);
+    // [FIX-COS10] 页脚与「ESC · 返回」按钮重叠：按钮底边到 H-12（ach/set/credits/guide 恒有、ghost/duel 矮视口有），
+    // 页脚基线在 H-14 直接从按钮下穿过 → 这些自绘子页一律让位不画页脚（各自已有返回按钮/页内提示）
+    if (G.tStage !== 'brb' && G.tStage !== 'ach' && G.tStage !== 'set' && G.tStage !== 'guide' &&
+        G.tStage !== 'credits' && G.tStage !== 'ghost' && G.tStage !== 'duel' && G.tStage !== 'duelres') {
+      txt('P 暂停 · M 静音 · A 成就 · G 指南 · S 设置 · C 关于 · B 构建器 · NEON VOID v1.5.0', cx, H - 14, 10, 'rgba(140,170,210,.4)', 'center', 500, true);
+    }
   } else if (G.state === 'levelup') {
     ctx.fillStyle = 'rgba(3,5,16,.8)';
     ctx.fillRect(0, 0, W, H);
@@ -4345,6 +4820,14 @@ function drawOverlay() {
       txt('荣誉榜第 ' + G.lbRank + ' 名 · HALL OF FAME #' + G.lbRank, cx, ly2, 12, 'rgba(255,220,140,.85)', 'center', 700, true);
       spBottom = ly2 + 6;
     }
+    // [SHADOW1] 召唤昨日之影的对局：结算对比「今日得分 vs 昨日得分」
+    if (G.shadowRun && G.shadowRef) {
+      const dl = Math.floor(G.score) - G.shadowRef.sc;
+      const sy2 = Math.max(H * 0.378, spBottom + 9);
+      txt('👻 昨日之影 ' + pad(G.shadowRef.sc, 7) + ' → 今日 ' + pad(Math.floor(G.score), 7) +
+        (dl > 0 ? ' (+' + dl + ')' : dl < 0 ? ' (' + dl + ')' : ' (持平)'), cx, sy2, 12, 'rgba(138,255,212,.9)', 'center', 700, true);
+      spBottom = sy2 + 6;
+    }
     if (W > 560) {
       ctx.save();
       ctx.shadowColor = RK[G.rank] || RK.D; ctx.shadowBlur = 24;
@@ -4366,6 +4849,9 @@ function drawOverlay() {
     if (G.mode === 'graze') rows.push(['擦弹数', String(G.grazes)]);
     if (G.won && (G.mode === 'classic' || G.mode === 'boss')) rows.splice(3, 0, ['通关用时', fmtTime(G.rt)]);
     if (G.mode === 'ghost' && G.ghost) rows.splice(3, 0, ['残影击杀链', '#' + G.ghost.chain]);
+    if (G.mode === 'duel' && G.duelRun) {
+      rows.splice(3, 0, ['对决种子', duelSeedText(G.duelRun.seed)], ['波次上限', G.duelRun.cap + ' 波' + (G.won ? ' · 已打满' : '')]);
+    }
     let ry = compact ? Math.max(H * 0.34, spBottom + 12) : Math.max(H * 0.40, spBottom + 12);
     const rowH = compact ? Math.max(15, Math.min(19, (btnY - 96 - ry) / rows.length)) : 24;
     rows.forEach((rw, i) => {
@@ -4389,6 +4875,11 @@ function drawOverlay() {
       const p3 = 0.5 + 0.5 * Math.sin(G.time * 4);
       txt('☠ 新悬赏码已就绪 · 击杀链 #' + pn + ' · 按 B 复制，把你的残影传给下一位猎人', cx, hintY, 13,
         'rgba(138,255,212,' + (0.65 + 0.35 * p3) + ')', 'center', 700, true);
+      hintDrawn = true;
+    } else if (G.mode === 'duel' && G.duelRun) {
+      const p3 = 0.5 + 0.5 * Math.sin(G.time * 4);
+      txt('⚔ 成绩码已就绪 · 按 D 复制回贴给对手 · 双方各开对方成绩码即判胜负', cx, hintY, 13,
+        'rgba(255,206,154,' + (0.65 + 0.35 * p3) + ')', 'center', 700, true);
       hintDrawn = true;
     } else if (canIssueBounty()) {
       txt('☠ 按 B 生成残影悬赏码 · 把这局构筑变成别人必须面对的 BOSS', cx, hintY, 12, 'rgba(138,255,212,.75)', 'center', 600, true);
@@ -4451,6 +4942,7 @@ function render() {
     // [FIX-COS5] title 态（主菜单/指南/关于/设置/成就）不绘制玩家飞船：goTitle 清空实体但不重置船位，
     // 残留船体会叠印在指南/关于面板文字上（测试员 bug1 的飞船图标）；其余实体数组均已被 goTitle 清空
     if (G.state !== 'title') {
+      if (G.shadowRun) drawShadowGhost();
       drawShip(player, PAL1);
       if (G.coop && player2.active) drawShip(player2, PAL2);
     }
@@ -4631,6 +5123,46 @@ function titleBtns() {
     });
     return out2;
   }
+  if (G.tStage === 'duel') {
+    // 种子对决：seed 行 + 波次上限行 + 14 卡初始构筑网格（确认页只读）+ 底部动作
+    const inv = !!(G.duelInv && G.duel);
+    const d = G.duel || { seed: 0, lv: [], cap: 10 };
+    const out2 = [];
+    if (!inv) {
+      const sw = Math.min(150, (W - 80) / 2 - 8);
+      out2.push({ x: W / 2 - sw - 6, y: H * 0.055 + 76, w: sw, h: 24, act: 'dseed:r', l: '🎲 随机种子', c: '#ff9a3c', f: 11 });
+      out2.push({ x: W / 2 + 6, y: H * 0.055 + 76, w: sw, h: 24, act: 'dseed:t', l: '📅 今日日期', c: '#3dff9e', f: 11 });
+      const cw = Math.min(84, (W - 120) / DUEL_CAPS.length - 6);
+      const cx0 = W / 2 - (DUEL_CAPS.length * cw + (DUEL_CAPS.length - 1) * 8) / 2;
+      DUEL_CAPS.forEach((c2, i) => {
+        out2.push({ x: cx0 + i * (cw + 8), y: H * 0.055 + 106, w: cw, h: 24, act: 'dcap:' + c2,
+          l: c2 + ' 波', c: d.cap === c2 ? '#ffc233' : '#5a7090', f: 11.5 });
+      });
+    }
+    const gc = 7;
+    const chw = Math.min(112, (W - 56) / gc - 6), chh = 27, cg = 4;
+    const gy0 = H * 0.055 + (inv ? 86 : 150);
+    const gx0 = W / 2 - (chw * gc + cg * (gc - 1)) / 2;
+    UPGRADES.forEach((u, i) => {
+      const lv = (d.lv && d.lv[i]) || 0;
+      out2.push({ x: gx0 + (i % gc) * (chw + cg), y: gy0 + Math.floor(i / gc) * (chh + cg), w: chw, h: chh,
+        act: inv ? '' : 'dcard:' + i, l: u.n, s: lv > 0 ? 'Lv ' + lv : '未选',
+        c: lv > 0 ? u.c : '#5a7090', f: 11 });
+    });
+    const aw = Math.min(190, (W - 90) / 3 - 8), ay = Math.min(H - 56 - SAFE.b, H * 0.80), ah = 42;
+    ['dgo|⚔ 出击 · Enter|#ff9a3c', 'dshare|⧉ 复制对决链接|#38c8ff', 'back|ESC · 返回|#7d95b8'].forEach((spec, i) => {
+      const p2 = spec.split('|');
+      out2.push({ x: W / 2 + (i - 1) * (aw + 8) - aw / 2, y: ay, w: aw, h: ah, act: p2[0], l: p2[1], c: p2[2] });
+    });
+    return out2;
+  }
+  if (G.tStage === 'duelres') {
+    const bw = Math.min(230, (W - 70) / 2), bh = 42, y = Math.min(H - 56 - SAFE.b, H * 0.30 + 136);
+    return [
+      { x: W / 2 - bw - 8, y, w: bw, h: bh, act: 'dgo', l: '⚔ 迎战这场对决 · Enter', c: '#ff9a3c' },
+      { x: W / 2 + 8, y, w: bw, h: bh, act: 'back', l: 'ESC · 返回', c: '#7d95b8' }
+    ];
+  }
   if (G.tStage === 'mode') {
     // 7 个模式 = 2 列 × 4 行；矮视口（横屏手机）自适应压缩行高，保证按钮组不越出屏底
     const bw = Math.min(300, (W - 56) / 2 - 4);
@@ -4643,9 +5175,12 @@ function titleBtns() {
       { x: W - 130 - SAFE.r, y: 12 + SAFE.t, w: 118, h: 26, act: 'ach', l: '🏆 成就 ' + G.ach.length + '/' + ACHV.length, c: '#ffc233', f: 11 },
       { x: W - 130 - SAFE.r, y: 44 + SAFE.t, w: 118, h: 26, act: 'guide', l: '📖 玩法指南 · G', c: '#4de3ff', f: 11 },
       { x: W - 130 - SAFE.r, y: 76 + SAFE.t, w: 118, h: 26, act: 'set', l: '⚙ 设置 SETTINGS', c: '#9fdcff', f: 11 },
-      { x: G.ghost ? W - 256 - SAFE.r : W - 130 - SAFE.r, y: 108 + SAFE.t, w: 118, h: 26, act: 'brb', l: '🛠 连战构建器', c: '#38c8ff', f: 11 }
+      { x: G.ghost || G.duelInv ? W - 256 - SAFE.r : W - 130 - SAFE.r, y: 108 + SAFE.t, w: 118, h: 26, act: 'brb', l: '🛠 连战构建器', c: '#38c8ff', f: 11 }
     ];
     if (G.ghost) chips.push({ x: W - 130 - SAFE.r, y: 108 + SAFE.t, w: 118, h: 26, act: 'ghost', l: '☠ 残影悬赏', c: '#8affd4', f: 11 });
+    // 种子对决入口（对决码家族的创建端）：常驻第二列，残影码在第一列时让到第三列，互不重叠
+    chips.push({ x: G.ghost ? W - 382 - SAFE.r : W - 256 - SAFE.r, y: 108 + SAFE.t, w: 118, h: 26,
+      act: 'duel', l: '⚔ 种子对决', c: '#ff9a3c', f: 11 });
     return chips.concat(MODES.map((m, i) => {
       const col = i % 2, row = Math.floor(i / 2);
       return { x: W / 2 + (col ? 5 : -bw - 5), y: y0 + row * (bh + gap), w: bw, h: bh,
@@ -4653,16 +5188,30 @@ function titleBtns() {
     }));
   }
   const bw = Math.min(170, (W - 80) / 2), bh = 42, y = H * 0.525;
-  return [
+  const pbtns = [
     { x: W / 2 - bw - 8, y, w: bw, h: bh, act: 'psolo', l: '1 · 单人出击', c: '#4de3ff' },
-    { x: W / 2 + 8, y, w: bw, h: bh, act: 'pcoop', l: '2 · 双人合作', c: '#ff5ec4' },
-    { x: W / 2 - 60, y: y + bh + 12, w: 120, h: 26, act: 'back', l: 'ESC · 返回上一步', c: '#7d95b8' }
+    { x: W / 2 + 8, y, w: bw, h: bh, act: 'pcoop', l: '2 · 双人合作', c: '#ff5ec4' }
   ];
+  // [SHADOW1] 每日挑战 + 有昨日采样 + 设置开启 → 出现「召唤昨日之影」开关（无数据入口隐藏）
+  const shAvail = G.tSel === 'daily' && CFG.shadow && !!shadowYesterday();
+  if (shAvail) {
+    pbtns.push({ x: W / 2 + 70, y: y + bh + 12, w: 150, h: 26, act: 'shsum',
+      l: G.shadowOn ? '👻 已召唤 · 点击取消' : '👻 召唤昨日之影', c: G.shadowOn ? '#3dff9e' : '#8affd4', f: 10.5 });
+    pbtns.push({ x: W / 2 - 90, y: y + bh + 12, w: 150, h: 26, act: 'back', l: 'ESC · 返回上一步', c: '#7d95b8' });
+  } else {
+    pbtns.push({ x: W / 2 - 60, y: y + bh + 12, w: 120, h: 26, act: 'back', l: 'ESC · 返回上一步', c: '#7d95b8' });
+  }
+  return pbtns;
 }
 function titleAct(a) {
   if (!a) return;
   if (a === 'back') {
     if (G.tStage === 'ghost') { dismissGhost(); uiClick(); return; }
+    // 对决页/结果页返回：清掉地址栏码（同 dismissGhost 的做法），构建参数保留可继续改编
+    if (G.tStage === 'duel' || G.tStage === 'duelres') {
+      G.duelInv = false; G.duelRes = null; G.duelShareMsg = '';
+      clearBountyHash();
+    }
     G.tStage = 'mode'; uiClick(); return;
   }
   if (a === 'ghost') { G.tStage = 'ghost'; uiClick(); return; }
@@ -4701,6 +5250,40 @@ function titleAct(a) {
     uiClick();
     return;
   }
+  if (a === 'duel') { loadDuels(); G.duelInv = false; G.duelShareMsg = ''; if (!G.duel) G.duel = { seed: (Math.random() * 4294967296) >>> 0, lv: UPGRADES.map(() => 0), cap: 10 }; G.tStage = 'duel'; uiClick(); return; }
+  if (a === 'dseed:r') { if (G.duel) { G.duel.seed = (Math.random() * 4294967296) >>> 0; G.duelShareMsg = ''; uiClick(); } return; }
+  if (a === 'dseed:t') { if (G.duel) { G.duel.seed = dailySeed(); G.duelShareMsg = '已切换为今日日期种子（与每日挑战同卷）'; uiClick(); } return; }
+  if (a.slice(0, 5) === 'dcap:') { if (G.duel) { G.duel.cap = CL(+a.slice(5) || 10, 1, 99); G.duelShareMsg = ''; uiClick(); } return; }
+  if (a.slice(0, 6) === 'dcard:') {
+    if (G.duel) {
+      const i = +a.slice(6);
+      const u = UPGRADES[i];
+      if (u) {
+        const cur = G.duel.lv[i] || 0;
+        G.duel.lv[i] = cur + 1 > u.max ? 0 : cur + 1;
+        G.duelShareMsg = '';
+        uiClick();
+      }
+    }
+    return;
+  }
+  if (a === 'dshare') {
+    if (!G.duel) { G.duelShareMsg = '先设定对决参数'; uiClick(); return; }
+    const code = duelPack(G.duel);
+    copyText(duelURL(code), ok => {
+      G.duelShareMsg = ok ? '✓ 对决链接已复制 · 发给对手，同码同卷同升级序列' : '复制失败 · 对决码 ' + code;
+    });
+    uiClick();
+    return;
+  }
+  if (a === 'dgo') {
+    if (!G.duel) { G.duelShareMsg = '对决参数无效'; uiClick(); return; }
+    uiClick();
+    G.shadowOn = false; // 对决不是每日卷，不开影
+    startGame('duel', 'solo');
+    return;
+  }
+  if (a === 'shsum') { G.shadowOn = !G.shadowOn; uiClick(); return; }
   if (a === 'gfight') { uiClick(); startGame('ghost', 'solo'); return; }
   if (a === 'ach') { G.tStage = 'ach'; uiClick(); return; }
   if (a === 'set') { G.tStage = 'set'; uiClick(); return; }
@@ -4782,6 +5365,7 @@ function handleKey(code) {
     uiClick();
     return;
   }
+  if (code === 'KeyD' && G.state === 'over' && G.over > 0.7 && G.mode === 'duel' && G.duelRun) { copyDuelScoreURL(); return; }
   if (code === 'KeyB' && G.state === 'over' && G.over > 0.7) { copyBountyURL(); return; }
   if (code === 'KeyV' && G.state === 'over' && G.over > 0.7) { downloadAutopsy(); uiClick(); return; }
   if (G.state === 'title') {
@@ -4808,6 +5392,16 @@ function handleKey(code) {
       if (code === 'Digit3') { titleAct('gp:2'); return; }
       if (code === 'Digit4') { titleAct('gp:3'); return; }
       if (code === 'Backspace' || code === 'KeyG') { titleAct('back'); return; }
+      return;
+    }
+    if (G.tStage === 'duel') {
+      if (code === 'Enter' || code === 'Space' || code === 'NumpadEnter') { titleAct('dgo'); return; }
+      if (code === 'Backspace' || code === 'Escape') { titleAct('back'); return; }
+      return;
+    }
+    if (G.tStage === 'duelres') {
+      if (code === 'Enter' || code === 'Space' || code === 'NumpadEnter') { titleAct('dgo'); return; }
+      if (code === 'Backspace' || code === 'Escape') { titleAct('back'); return; }
       return;
     }
     if (G.tStage === 'mode') {
@@ -5134,12 +5728,24 @@ if (bootGhost) { G.ghost = bootGhost; G.tStage = 'ghost'; }
 loadRush();
 const bootRush = parseHashRush();
 if (bootRush) { G.rush = bootRush; G.rushInv = true; G.tStage = 'brb'; }
+// 种子对决：本地对决史 / 昨日之影档案初始化（坏档自愈在各自的 sanitize 里）
+loadDuels();
+loadShadow();
+// 带 #duel=<码> 打开 → 对决确认页；带 #duelres=<成绩码> 打开 → 与本机对决史判胜负
+const bootDuel = parseHashDuel();
+if (bootDuel) { G.duel = bootDuel; G.duelInv = true; loadDuels(); G.tStage = 'duel'; }
+const bootDuelRes = parseHashDuelRes();
+if (bootDuelRes) { G.duelRes = applyDuelRes(bootDuelRes); G.duel = { seed: bootDuelRes.seed, lv: bootDuelRes.lv, cap: bootDuelRes.cap }; G.duelInv = true; G.tStage = 'duelres'; }
 window.addEventListener('hashchange', () => {
   if (G.state !== 'title') return;
   const gh2 = parseHashBounty();
   if (gh2) { G.ghost = gh2; G.tStage = 'ghost'; return; }
   const rh2 = parseHashRush();
   if (rh2) { G.rush = rh2; G.rushInv = true; G.rushShareMsg = ''; G.tStage = 'brb'; }
+  const dl2 = parseHashDuel();
+  if (dl2) { G.duel = dl2; G.duelInv = true; loadDuels(); G.tStage = 'duel'; return; }
+  const dr2 = parseHashDuelRes();
+  if (dr2) { G.duelRes = applyDuelRes(dr2); G.duel = { seed: dr2.seed, lv: dr2.lv, cap: dr2.cap }; G.duelInv = true; G.tStage = 'duelres'; }
 });
 // PWA 离线缓存：sw.js 是唯一附加文件，file:// 下不注册（双击即玩不受影响）
 if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
@@ -5158,6 +5764,11 @@ window.NV_SNAP = () => ({
   boss: G.boss ? [G.boss.ki, G.boss.st, G.boss.hp, G.boss.maxhp] : null,
   dailyRank: G.dailyRank, dstat: G.dstat ? { streak: G.dstat.streak, best: G.dstat.best.s, mcombo: G.dstat.mcombo } : null,
   ach: G.ach.slice(), qToast: G.qToast ? G.qToast.msg : null, errStreak: G.errStreak,
+  duelRun: G.duelRun ? { seed: G.duelRun.seed, cap: G.duelRun.cap, lv: G.duelRun.lv.slice() } : null,
+  shadowRun: G.shadowRun, shadowOn: G.shadowOn, shadowRef: G.shadowRef ? { sc: G.shadowRef.sc, w: G.shadowRef.w, n: Math.floor(G.shadowRef.s.length / 3) } : null,
+  shSampN: G.shSamp ? Math.floor(G.shSamp.length / 3) : 0,
+  duels: (G.duels || []).map(d => ({ seed: d.seed, cap: d.cap, me: d.me ? d.me.s : null, opp: d.opp ? d.opp.s : null, res: d.res })),
+  tStage: G.tStage,
   sgeom: G.tStage === 'set' ? setGeom() : null
 });
 window.NV_CHEAT = {
