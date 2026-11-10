@@ -2,8 +2,8 @@
    单文件游戏的离线缓存：stale-while-revalidate，hash 参数不影响命中（# 不发往网络）
    [FIX-SW1] 每次发版必须递增 CACHE 版本号：activate 清掉旧缓存，已打开的旧标签页
    下一次请求即换新版本，避免修复后的代码被旧缓存持续顶住（白屏旧案复发通道） */
-const CACHE = 'neon-void-v5'; // v1.3.0 收尾：manifest/图标落地为同源文件，随 CORE 预缓存（发版必递增）
-const CORE = ['./', './index.html', './manifest.webmanifest', './icon.svg'];
+const CACHE = 'neon-void-v6'; // v1.4.0：每日挑战留存 + 画质自适应 L0-L2（发版必递增；v4→v6 跳号避开 polish 分支已占用的 v5）
+const CORE = ['./', './index.html'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(
