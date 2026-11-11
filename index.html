@@ -68,6 +68,22 @@ const pad = (n, l) => String(n).padStart(l, '0');
 const MONO = 'ui-monospace,"Cascadia Mono",Consolas,monospace';
 const FONT = '"Microsoft YaHei","PingFang SC","Noto Sans SC",system-ui,sans-serif';
 const CALM = (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) ? 0.25 : 1;
+/* [UI-COL] 语义色板（本轮视觉一致性归并）：按钮面板/主文字/Toast 边框等高频色统一从这里取。
+   只收口 UI 结构色（面板底、文字、四大模式分组），战斗实体的各自彩色不入板，避免牵一发动全身。 */
+const COL = {
+  cyan: '#4de3ff',   // 主色 / 核心弹幕组
+  gold: '#ffc233',   // 成就 / 高亮
+  green: '#3dff9e',  // 成功 / 每日仪式组
+  pink: '#ff2e7e',   // 对抗 / 与人过招组
+  mint: '#8affd4',   // 残影 / 成功反馈
+  orange: '#ff9a3c', // 种子对决
+  purple: '#b46bff', // 深渊 / C 级
+  steel: '#7d95b8',  // 次级按钮（ESC 返回等）
+  dim: '#8fa6c8',    // 弱文字
+  text: '#f2fbff',   // 按钮主文字
+  panel: 'rgba(8,14,30,0.9)',   // 按钮面板底
+  panelHi: 'rgba(8,14,30,0.92)' // 结算/卡片面板底（略深）
+};
 
 /* ================= dom ================= */
 const root  = document.getElementById('neon-void-root');
@@ -131,14 +147,19 @@ let nebLast = -9;
 let gridPts = [], gridCols = 0, gridRows = 0, gridSp = 48;
 const ret = { x: 400, y: 250 };
 try { G.hiscore = +localStorage.getItem('neonvoid_hiscore') || 0; } catch (e) {}
+/* [ELEG8-IA] 模式分组：7 个模式按钮 + 3 个 chip 入口（⚔ 种子对决/☠ 残影悬赏/🛠 连战构建器）按
+   「核心弹幕 / 每日仪式 / 与人过招 / 进阶挑战」四组归档，新玩家一眼知道先玩哪个。
+   一句话描述（d）在按钮副标题常驻（移动端直接可读）；分组名画在按钮标题行右端（悬停/选中提亮）。
+   boss/chaos 任务书未指定组：BOSS 连战属核心玩法 → 核心弹幕；混沌（词条 ×2 无尽）归进阶挑战。 */
+const MODE_GROUPS = { core: ['核心弹幕', COL.cyan], ritual: ['每日仪式', COL.green], vs: ['与人过招', COL.pink], adv: ['进阶挑战', COL.gold] };
 const MODES = [
-  { k: 'classic', n: '经典战役', en: 'CAMPAIGN', d: '15 波推进 · 击败最终核心通关', c: '#4de3ff', key: '1' },
-  { k: 'endless', n: '无尽深渊', en: 'ENDLESS', d: '永无止境 · 难度持续攀升', c: '#b46bff', key: '2' },
-  { k: 'boss',    n: 'BOSS 连战', en: 'BOSS RUSH', d: '6 场核心恶战 · 终局奇点之瞳', c: '#ff5e5e', key: '3' },
-  { k: 'chaos',   n: '混沌挑战', en: 'CHAOS', d: '随机 3 词条 · 得分×2 · 无尽', c: '#ffe233', key: '4' },
-  { k: 'daily',   n: '📅 每日挑战', en: 'DAILY', d: '每日同卷 · 全员同词条 · ×2 · 记连续天数', c: '#3dff9e', key: '5' },
-  { k: 'versus',  n: '对抗对决', en: 'VERSUS', d: 'P2 操控 BOSS · 1v1 决斗', c: '#ff2e7e', key: '6' },
-  { k: 'graze',   n: '擦弹专精', en: 'GRAZE RUN', d: '开火封印 · 擦弹即得分 · 无尽', c: '#eaff6a', key: '7' }
+  { k: 'classic', n: '经典战役', en: 'CAMPAIGN', d: '15 波推进 · 击败最终核心通关', c: '#4de3ff', key: '1', g: 'core' },
+  { k: 'endless', n: '无尽深渊', en: 'ENDLESS', d: '永无止境 · 难度持续攀升', c: '#b46bff', key: '2', g: 'core' },
+  { k: 'boss',    n: 'BOSS 连战', en: 'BOSS RUSH', d: '6 场核心恶战 · 终局奇点之瞳', c: '#ff5e5e', key: '3', g: 'core' },
+  { k: 'chaos',   n: '混沌挑战', en: 'CHAOS', d: '随机 3 词条 · 得分×2 · 无尽', c: '#ffe233', key: '4', g: 'adv' },
+  { k: 'daily',   n: '📅 每日挑战', en: 'DAILY', d: '每日同卷 · 全员同词条 · ×2 · 记连续天数', c: '#3dff9e', key: '5', g: 'ritual' },
+  { k: 'versus',  n: '对抗对决', en: 'VERSUS', d: 'P2 操控 BOSS · 1v1 决斗', c: '#ff2e7e', key: '6', g: 'vs' },
+  { k: 'graze',   n: '擦弹专精', en: 'GRAZE RUN', d: '开火封印 · 擦弹即得分 · 无尽', c: '#eaff6a', key: '7', g: 'adv' }
 ];
 const MODE_TAG = { classic: '经典', endless: '无尽', boss: '连战', chaos: '混沌', daily: '每日', versus: '对抗', ghost: '残影', graze: '擦弹', brb: '连战构建', duel: '对决' };
 // 结算战报/验尸海报的模式名：brb（构建器连战）不在 MODES 里，ghost 有专属称谓，统一从这里取
@@ -190,6 +211,9 @@ function loadLB() {
   } catch (e) { G.lb = []; }
 }
 loadLB();
+/* [ELEG8-IA] 首次启动引导：无 neonvoid_played 标记 = 新玩家，模式页空槽位显示「推荐从经典战役开始」；
+   完成任意一局（recordScore 落档时）写入标记并隐藏。只影响提示显隐，不触碰任何玩法流。 */
+try { G.firstRun = !localStorage.getItem('neonvoid_played'); } catch (e) { G.firstRun = true; }
 /* [DAILY1] 随机数收口：玩法随机（波次构成/敌人类型/落点/掉落/暴击/升级三选一/词条/BOSS 弹幕）
    全部走可播种流 RSTATE（mulberry32 算法原地推进），表现随机（粒子/音效/震屏/标题氛围）保留
    Math.random —— 表现层每帧消耗量随帧率浮动，混进玩法流会破坏「同日同卷」的逐帧一致性。
@@ -369,7 +393,7 @@ const GUIDE = [
     '「复制分享链接」生成 #rush= 码；好友打开链接直接迎战你的自定义菜单',
     '自定义连战的成绩进同一荣誉榜（标注「连战构建」），评级线与 BOSS 连战一致',
     '每日挑战卷面按日期播种，荣誉榜行标注 DAILY、评级线独立；连续 7 天有「七日之约」成就',
-    '种子对决（主界面「⚔ 种子对决」）：对决码编码 seed/初始构筑/波次上限——同码同卷同词条同升级序列',
+    '种子对决（主界面「⚔ 种子对决」）：对决码编码 seed/初始构筑/波次上限——同码同卷同词条同随机流（升级三选一同池，序列随对局节奏）',
     '对决打满波次上限即完成；结算按 D 复制成绩码回贴给对手，双方各开对方成绩码即判胜负，历史入「对决史」',
     '昨日之影：每日挑战每 0.5 秒记录走位（本机留存 7 天）；开每日挑战前可「召唤昨日之影」回放昨日走位，结算对比两日得分'
   ] }
@@ -681,6 +705,9 @@ function pad2(t, semis) {
 
 /* ================= fx helpers ================= */
 function banner(m, s, c, small) { G.banner = { m, s, c: c || '#4de3ff', t: 0, d: small ? 1.5 : 2.3, small: !!small }; }
+/* [ELEG8-TOAST] 轻量通知统一走顶部小胶囊 toast()（与画质档位提示同一绘制管线 drawQToast）：
+   原先散落的 addText 定位文案（复制成功/失败、海报失败等）各自挑 y 落点，风格与位置都不统一。 */
+function toast(msg, c) { G.qToast = { t: 0, msg, c: c || '#9fdcff' }; }
 /* [PERF-L] 画质档位：L0 全效 → L1 粒子减半+辉光/星云减载 → L2 弹幕上限 400→300+背景静态化。
    只动表现层预算（粒子/辉光/星云/弹幕池上限），弹幕数据格式、战报、悬赏码完全不受档位影响。
    自动档（CFG.fx=0）由主循环的 FPS 治理器驱动：<40fps 持续 10 秒降一档，≥55fps 持续 20 秒回升
@@ -688,12 +715,18 @@ function banner(m, s, c, small) { G.banner = { m, s, c: c || '#4de3ff', t: 0, d:
 function setTier(t, announce) {
   t = CL(t, 0, 2);
   if (t === G.tier) return;
+  const down = t > G.tier; // 档位数字越大画质越低：L0→L2 是降档，L2→L0 是回升
   G.tier = t;
   G.q = [2, 1, 0][t];
   G.tLow = 0; G.tHigh = 0;
   EB_CAP = t >= 2 ? 300 : 400;
   if (announce) {
-    G.qToast = { t: 0, msg: t === 0 ? '画质已回升 · L0 全效' : t === 1 ? '画质降档 · L1 省电（粒子减半）' : '画质降档 · L2 流畅（弹幕上限 300 · 背景静态化）' };
+    // [ELEG8-QT] 方向感知文案：L2→L1 是「回升」不是「降档」（旧版 L1 固定叫降档，回升时误导）。
+    // 降档说清让出了什么；回升说清恢复了什么（L2→L1 = 弹幕上限回 400 + 背景复载）。
+    toast(down
+      ? (t === 1 ? '画质降档 · L1 省电（粒子减半）' : '画质降档 · L2 流畅（弹幕上限 300 · 背景静态化）')
+      : (t === 1 ? '画质回升 · L1（弹幕上限回 400 · 背景复载）' : '画质已回升 · L0 全效'),
+      down ? '#9fdcff' : '#3dff9e');
   }
 }
 const PF = () => G.tier >= 1 ? 0.5 : 1; // [PERF-L] 表现层粒子生成概率倍率：L1/L2 减半
@@ -1082,7 +1115,7 @@ function startGame(gmode, pmode) {
   else if (gmode === 'duel') srand(G.duelRun.seed);
   else srand((((Math.random() * 4294967296) >>> 0) ^ (Date.now() & 0x7fffffff) ^ (performance.now() * 1000 & 0x7fffffff)) >>> 0);
   // 种子对决：对决码自带初始构筑——按 v3 卡位顺序预挂卡等（与三选一升级同管线，armor/revive 副作用一致），
-  // 等级/升级需求同步推算，保证「同码同构筑同升级序列」
+  // 等级/升级需求同步推算，保证「同码同构筑同升级随机流」（同事件顺序下三选一序列逐位一致）
   if (gmode === 'duel' && G.duelRun) {
     let lvSum = 0;
     UPGRADES.forEach((u, i) => {
@@ -1098,6 +1131,7 @@ function startGame(gmode, pmode) {
   G.shadowRun = !!(gmode === 'daily' && G.shadowRef);
   G.shSamp = (gmode === 'daily' && CFG.shadow) ? [] : null;
   G.shT = 0; G.shAct = 0;
+  joy.used = false; // [ELEG8-JOY] 每局重置：触屏操作提示在局首重新可用，首触即隐
   player.x = W / 2 - (G.coop ? 90 : 0); player.y = H * 0.62; player.vx = 0; player.vy = 0;
   player.spawnT = 0.5;
   parts.push({ type: 2, x: player.x, y: player.y, vx: 0, vy: 0, rad: 4, vr: 620, life: 0.5, ml: 0.5, c: '#4de3ff', sz: 2.5, drag: 0 });
@@ -1177,6 +1211,11 @@ function gameOver() {
 }
 function recordScore() {
   G.rank = calcRank();
+  // [ELEG8-IA] 完成一局（胜负均算）→ 首次引导立即隐藏（内存标记同步，无需等下次加载）
+  if (G.firstRun) {
+    G.firstRun = false;
+    try { localStorage.setItem('neonvoid_played', '1'); } catch (e) {}
+  }
   if (G.score > G.hiscore) {
     G.hiscore = G.score; G.newHi = true;
     try { localStorage.setItem('neonvoid_hiscore', String(G.hiscore)); } catch (e) {}
@@ -1221,7 +1260,7 @@ function recordScore() {
   // [DUEL2] 种子对决：我方成绩入对决史（同 seed 一条；对手成绩码已到过则当场判胜负）
   if (G.mode === 'duel') duelRecordRun();
 }
-const RK = { S: '#ffc233', A: '#3dff9e', B: '#4de3ff', C: '#b46bff', D: '#8fa6c8' };
+const RK = { S: COL.gold, A: COL.green, B: COL.cyan, C: COL.purple, D: COL.dim }; // [UI-COL] 评级色并入色板
 const RN = { S: '传说 · LEGEND', A: '宗师 · MASTER', B: '精英 · ELITE', C: '行者 · RUNNER', D: '新兵 · ROOKIE' };
 function calcRank() {
   // 各形态计分尺度不同（擦弹=贴脸生存、构建器=纯 BOSS 战），评级线分开标定，避免跨形态失真
@@ -1427,9 +1466,9 @@ function bountyURL(code) {
 }
 function copyBountyURL() {
   const code = activeBountyCode();
-  if (!code) { addText(W / 2, H * 0.78, '此局无法生成悬赏码', '#ff8866', 14); return; }
-  copyText(bountyURL(code), ok => addText(W / 2, H * 0.78,
-    ok ? '✓ 残影悬赏链接已复制 · 发给朋友来讨伐你的残影' : '复制失败 · 悬赏码 ' + code, ok ? '#8affd4' : '#ff6688', 14));
+  if (!code) { toast('此局无法生成悬赏码', '#ff8866'); return; }
+  copyText(bountyURL(code), ok => toast(
+    ok ? '✓ 残影悬赏链接已复制 · 发给朋友来讨伐你的残影' : '复制失败 · 悬赏码 ' + code, ok ? '#8affd4' : '#ff6688'));
   uiClick();
 }
 function parseHashBounty() {
@@ -1501,7 +1540,7 @@ function loadRush() {
 /* ================= 种子对决 duel code ================= */
 // 悬赏码家族新成员：#duel=（对决码）/ #duelres=（成绩码），与 #bounty= / #rush= 相互独立。
 // 对决码 v1 布局（21 字节）：[ver=1, seed u32×4, 14×初始卡等级, 波次上限 u8, XOR校验] → 28 字符 base64url。
-//   seed 任意 32 位（构建器「今日日期」档即 dailySeed() 的输出）——同码播种 RSTATE 后同布局同词条同升级序列。
+//   seed 任意 32 位（构建器「今日日期」档即 dailySeed() 的输出）——同码播种 RSTATE 后同布局同词条同升级随机流。
 //   卡等级沿用悬赏码 v3 的 14 卡位（UPGRADES 顺序，0..min(7,卡max)）。
 // 成绩码 v1 布局（26 字节）：[ver=1, seed u32×4, cap u8, 14×卡等级, 得分 u24, 波次 u8, 标志位, XOR校验] → 35 字符。
 //   标志位：bit0=通关(打满上限)；bit2-4=评级序号（0..4 → SABCD）。码内带 cap/构筑 → 对手没打过也能直接迎战。
@@ -1622,10 +1661,10 @@ function duelFromRun() {
 // 成绩码复制（结算页按 D / 点按钮）：码内含 seed/cap/构筑/得分/波次/评级，对手开链接即判胜负
 function copyDuelScoreURL() {
   const r = duelFromRun();
-  if (!r) { addText(W / 2, H * 0.78, '此局无法生成成绩码', '#ff8866', 14); return; }
-  copyText(duelScoreURL(duelScorePack(r)), ok => addText(W / 2, H * 0.78,
+  if (!r) { toast('此局无法生成成绩码', '#ff8866'); return; }
+  copyText(duelScoreURL(duelScorePack(r)), ok => toast(
     ok ? '✓ 成绩码已复制 · 回贴给对手，各自打开对方成绩码即判胜负' : '复制失败 · 成绩码 ' + duelScorePack(r),
-    ok ? '#ffce9a' : '#ff6688', 14));
+    ok ? '#ffce9a' : '#ff6688'));
   uiClick();
 }
 /* [DUEL2] 对决史（本机留存）：同一 seed 一条记录，me=我方成绩 / opp=对手成绩 / res=w|l|t|''。
@@ -1936,9 +1975,9 @@ function downloadAutopsy() {
     const a = document.createElement('a');
     a.href = autopsyCache.url; a.download = autopsyFileName();
     document.body.appendChild(a); a.click(); a.remove();
-    addText(W / 2, H * 0.72, '✓ 验尸海报已保存 PNG', '#3dff9e', 15);
+    toast('✓ 验尸海报已保存 PNG', '#3dff9e');
   } catch (e) {
-    addText(W / 2, H * 0.72, '海报生成失败 · 请手动截图', '#ff6688', 14);
+    toast('海报生成失败 · 请手动截图', '#ff6688');
   }
 }
 function shareAutopsy() {
@@ -1951,7 +1990,7 @@ function shareAutopsy() {
           const f = new File([blob], autopsyFileName(), { type: 'image/png' });
           if (navigator.canShare({ files: [f] })) {
             navigator.share({ files: [f], title: 'NEON VOID 验尸报告', text: battleReport() }).catch(() => {});
-            addText(W / 2, H * 0.72, '✓ 已调起系统分享', '#3dff9e', 15);
+            toast('✓ 已调起系统分享', '#3dff9e');
           } else downloadAutopsy();
         } catch (e) { downloadAutopsy(); }
       }, 'image/png');
@@ -1979,7 +2018,7 @@ function overAct(k) {
   else if (k === 'bounty') copyBountyURL();
   else if (k === 'paper') downloadAutopsy();
   else if (k === 'share') shareAutopsy();
-  else if (k === 'report') copyText(battleReport(), ok => addText(W / 2, H * 0.78, ok ? '✓ 战报已复制到剪贴板' : '复制失败，请手动截图', ok ? '#3dff9e' : '#ff6688', 15));
+  else if (k === 'report') copyText(battleReport(), ok => toast(ok ? '✓ 战报已复制到剪贴板' : '复制失败，请手动截图', ok ? '#3dff9e' : '#ff6688'));
 }
 function winGame() {
   G.state = 'over'; G.over = 0; G.won = true;
@@ -3726,18 +3765,20 @@ function drawShadowGhost() {
   ctx.beginPath(); ctx.moveTo(9, 0); ctx.lineTo(3, 2.4); ctx.lineTo(1, 0); ctx.lineTo(3, -2.4); ctx.closePath(); ctx.fill();
   ctx.rotate(-ang);
   // 关键动作标记：炸弹=扩散环，技能=船体上方小 glyph（纯表现）
+  // [FIX-ELEG8-2X] 此处画布已 translate(x,y)（上方 3752 行），标记必须用相对坐标 (0,0)：
+  // 原样写绝对坐标 x/y 等于把位置再叠加一次 → 炸弹环/技能 glyph/「昨日之影」标签全部画到 (2x,2y)，屏内永远看不到
   if (f & SH_ACT.bomb) {
     const ph = (G.runT * 2) % 1;
     ctx.globalAlpha = (1 - ph) * 0.5 * fade;
     ctx.strokeStyle = '#ffe233'; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.arc(x, y, 14 + ph * 60, 0, TAU); ctx.stroke();
+    ctx.beginPath(); ctx.arc(0, 0, 14 + ph * 60, 0, TAU); ctx.stroke();
   } else if (f) {
     const gl = (f & SH_ACT.dash ? '»' : '') + (f & SH_ACT.rift ? '◇' : '') + (f & SH_ACT.od ? '⚡' : '') + (f & SH_ACT.ultra ? '✦' : '');
     ctx.globalAlpha = 0.8 * fade;
-    txt(gl, x, y - 24 + Math.sin(G.time * 7) * 1.5, 11, '#c9ffe9', 'center', 800);
+    txt(gl, 0, -24 + Math.sin(G.time * 7) * 1.5, 11, '#c9ffe9', 'center', 800);
   }
   ctx.globalAlpha = 0.4 * fade;
-  txt('昨日之影', x, y + 24, 9, 'rgba(138,255,212,.9)', 'center', 600, true);
+  txt('昨日之影', 0, 24, 9, 'rgba(138,255,212,.9)', 'center', 600, true);
   ctx.restore();
   ctx.globalAlpha = 1;
 }
@@ -3944,11 +3985,13 @@ function drawHUD() {
   if (G.shield) chipRow('◈ 护盾 SHIELD', '#3ddfff', null);
   if (G.triple > 0) chipRow('≡ 三重 TRIPLE ' + Math.ceil(G.triple) + 's', '#3dff9e', G.triple / 12);
   if (G.rapid > 0) chipRow('» 极速 RAPID ' + Math.ceil(G.rapid) + 's', '#ffc233', G.rapid / 12);
-  if (G.runT < 9 && G.wave <= 1 && G.state === 'playing') {
+  if (G.runT < 9 && G.wave <= 1 && G.state === 'playing' && !(G.touchMode && joy.used)) {
     // [FIX-COS3] 触屏设备提示改用触屏文案（原键盘文案在触屏上不适用，且长文案会被右侧虚拟按钮遮住）
+    // [ELEG8-JOY] 触屏行抬高到 H-96 且摇杆一旦使用（joy.used）即隐：摇杆圆环 r=44 跟随手指出现在
+    // 左半屏任意位置，原 H-74 行正好在低持握带的圆环路径上，提示行会从半透明圆环中穿过（观感瑕疵）。
     txt(G.touchMode ? '左侧摇杆移动 · 右侧按钮放技能 · 拾取水晶升级 · 擦弹充能奇点'
       : '移动 WASD · Shift 冲刺 · 空格 炸弹 · Q/E/X 技能 · 拾取水晶升级 · 击杀/擦弹充能奇点',
-      W / 2, H - 74 - SAFE.b, 13, 'rgba(160,200,255,' + CL((9 - G.runT) / 2.5, 0, 0.8) + ')', 'center', 600);
+      W / 2, (G.touchMode ? H - 96 : H - 74) - SAFE.b, 13, 'rgba(160,200,255,' + CL((9 - G.runT) / 2.5, 0, 0.8) + ')', 'center', 600);
   }
   if (G.boss && G.boss.dying == null && G.boss.st !== 'enter') {
     const b = G.boss;
@@ -4119,9 +4162,13 @@ function drawAchPop() {
   const out = t > 2.9 ? CL((3.4 - t) / 0.5, 0, 1) : 1;
   const ex = 1 - Math.pow(1 - inn, 3);
   const x = W - 210 + (1 - ex) * 226;
+  // [ELEG8-ACHPOP] 矮视口（横屏手机 H<560）结算屏上 RANK 字母区在 H*0.545±29 ≈ 183-241，
+  // 弹窗 y=142 高 54 → 底缘 196 压住 RANK 字母顶部 → 矮视口抬到 92（底缘 146，让出字母区）；
+  // 桌面 RANK 在更下方（H*0.545 远大于 196），保持 142 原位。
+  const ay0 = H < 560 ? 92 : 142;
   ctx.save();
   ctx.globalAlpha = out;
-  ctx.translate(x, 142);
+  ctx.translate(x, ay0);
   ctx.fillStyle = 'rgba(10,14,30,0.92)';
   ctx.strokeStyle = '#ffc233'; ctx.lineWidth = 1.5;
   rr(0, 0, 196, 54, 10); ctx.fill(); ctx.stroke();
@@ -4165,23 +4212,25 @@ function drawBanner() {
   ctx.restore();
   ctx.globalAlpha = 1;
 }
-/* [PERF-L] 画质档位 toast：自动降档/回升时一次性提示当前档位（顶部居中小胶囊，2.6s 自灭） */
+/* [PERF-L] 画质档位 toast：自动降档/回升时一次性提示当前档位（顶部居中小胶囊，2.6s 自灭）。
+   [ELEG8-TOAST] 对局中胶囊下移到 40：原 y=12 正好盖住计时器（⏱ y=13）/BOSS 血条（y 13-28）；
+   非对局态（标题/结算）没有顶部 HUD，维持 12。描边/文字色随 toast 类型（q.c）。 */
 function drawQToast() {
   const q = G.qToast;
   if (!q) return;
   const a = q.t < 0.25 ? q.t / 0.25 : q.t > 2.1 ? CL((2.6 - q.t) / 0.5, 0, 1) : 1;
   ctx.font = '600 12px ' + FONT;
   const w2 = Math.ceil(ctx.measureText(q.msg).width) + 30;
-  const x0 = W / 2 - w2 / 2, y0 = 12 + SAFE.t;
+  const x0 = W / 2 - w2 / 2, y0 = (G.state === 'playing' ? 40 : 12) + SAFE.t;
   ctx.save();
   ctx.globalAlpha = a * 0.95;
-  ctx.fillStyle = 'rgba(8,14,30,0.92)';
-  ctx.strokeStyle = '#9fdcff';
+  ctx.fillStyle = COL.panelHi;
+  ctx.strokeStyle = q.c || '#9fdcff';
   ctx.lineWidth = 1.2;
   rr(x0, y0, w2, 24, 12);
   ctx.fill(); ctx.stroke();
   ctx.globalAlpha = a;
-  txt(q.msg, W / 2, y0 + 13, 12, '#9fdcff', 'center', 600, true);
+  txt(q.msg, W / 2, y0 + 13, 12, q.c || '#9fdcff', 'center', 600, true);
   ctx.restore();
 }
 function drawReticle() {
@@ -4264,6 +4313,16 @@ function drawKillcam() {
   ctx.restore();
   ctx.globalAlpha = 1;
 }
+/* [ELEG8-OVER] 结算屏胜局标题统一来源（与 winGame 开局横幅同口径；败局标题各形态固定）。
+   六形态共用同一布局函数 drawOverlay 的 over 分支：标题 → 评级字母 → 数据行 → CTA → 按钮区。 */
+function overTitle() {
+  return G.mode === 'boss' ? ['全灭达成', 'A L L   B O S S E S   D O W N']
+    : G.mode === 'brb' ? ['全灭达成', 'C U S T O M   R U S H   C L E A R']
+    : G.mode === 'versus' ? ['P1 获胜', 'S H I P   W I N S']
+    : G.mode === 'ghost' ? ['残影讨伐', 'G H O S T   S L A I N']
+    : G.mode === 'duel' ? ['对决完成', 'D U E L   C O M P L E T E']
+    : ['虚空肃清', 'S E C T O R   C L E A R E D'];
+}
 function drawOverlay() {
   const cx = W / 2;
   if (G.state === 'title') {
@@ -4274,7 +4333,19 @@ function drawOverlay() {
     // 连战构建器（brb）与种子对决（duel/duelres）有自己的整页 UI，同样跳过 logo。
     if (G.tStage !== 'guide' && G.tStage !== 'credits' && G.tStage !== 'brb' &&
         G.tStage !== 'duel' && G.tStage !== 'duelres') {
-      const ts = Math.min(62, W * 0.105, H * 0.10);
+      // [ELEG8-IA] 模式页大 logo 右端不得越过顶右 chip 第二列（W-256-SAFE.r）左缘 -12px：
+      // 844×390 上「⚔ 种子对决」chip 与 logo 字身仅剩 ~37px 余量，真机/无头字体度量稍宽即互相压字
+      //（实测案：chip 左缘压住 logo 约 50px）。按 100px 基准实测 'NEON VOID' 宽度反推 ts 上限
+      //（字距 8×6px 不随 ts 缩放，单独扣除）；仅 mode 页有 chip 列，其余页不受影响。
+      let ts = Math.min(62, W * 0.105, H * 0.10);
+      if (G.tStage === 'mode') {
+        const chipL = W - 256 - SAFE.r - 12;
+        ctx.letterSpacing = '0px';
+        ctx.font = '900 100px ' + MONO;
+        const w100 = ctx.measureText('NEON VOID').width;
+        const maxW = 2 * Math.max(80, chipL - cx) - 48;
+        if (w100 * ts / 100 > maxW) ts = Math.max(18, maxW / w100 * 100);
+      }
       const ty = H * 0.30;
       const gl = (G.time % 2.8) < 0.13;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -4366,7 +4437,7 @@ function drawOverlay() {
       ctx.shadowBlur = 0;
       const cl = [
         ['NEON VOID · 霓虹虚空', 22, '#eaf6ff', 800],
-        ['v1.5.0 · 单文件 · 零依赖 · ~260KB', 12, 'rgba(170,200,235,.8)', 600],
+        ['v1.5.1 · 单文件 · 零依赖 · ~265KB', 12, 'rgba(170,200,235,.8)', 600],
         ['v1.0.2 修复：无尽模式高波次白屏 · 超频射控失效 · 屏幕外残敌卡波', 11, 'rgba(120,230,190,.85)', 600],
         ['v1.0.3 平衡：高波次难度曲线（数量↑ / 血量封顶）· 帧循环微调', 11, 'rgba(120,230,190,.85)', 600],
         ['v1.1.0 扩充：奇点之瞳降临 · 双螺旋/镜面折返弹幕 · 超导闪现/虚空结晶/擦弹领域', 11, 'rgba(120,230,190,.85)', 600],
@@ -4374,6 +4445,7 @@ function drawOverlay() {
         ['v1.3.0 扩充：擦弹专精（开火封印 · 擦弹即得分）· 连战构建器（自选菜单 · #rush 分享码）', 11, 'rgba(120,230,190,.85)', 600],
         ['v1.4.0 扩充：每日挑战留存（本机最佳/连续天数）· 画质自适应 L0-L2（低端机兜底）', 11, 'rgba(120,230,190,.85)', 600],
         ['v1.5.0 扩充：种子对决（#duel= 同码同卷 · 成绩码定胜负 · 对决史）· 昨日之影（走位回放 · 两日对比）', 11, 'rgba(120,230,190,.85)', 600],
+        ['v1.5.1 打磨：模式分组与新手引导 · 结算屏/Toast 口径统一 · 摇杆/榜块/弹窗清账', 11, 'rgba(120,230,190,.85)', 600],
         ['', 10, '', 400],
         ['设计 · 代码 · 美术 · 音乐', 14, '#dfeeff', 700],
         ['全部由 AI 通过 VIBECODING 创作', 14, '#ff7ad9', 700],
@@ -4463,7 +4535,12 @@ function drawOverlay() {
           cx, H * 0.455, 11.5, '#cfe8ff', 'center', 700, true);
       }
       if (G.rushShareMsg) {
-        txt(G.rushShareMsg, cx, H * 0.72, 11.5, '#8affd4', 'center', 700);
+        // [ELEG8-BRB] 矮视口下 H*0.72 正落进动作按钮带（ay = min(H*0.76, H*0.49+86)，390 高时
+        // 带 = 277-319，H*0.72=281 从按钮上穿过）→ 落在带内时让位到按钮行下方，桌面几何不变
+        const ayS = Math.min(H * 0.76, H * 0.49 + 86); // 与 titleBtns brb 动作行同一公式
+        const smY = H * 0.72;
+        txt(G.rushShareMsg, cx, (smY > ayS - 10 && smY < ayS + 52) ? Math.min(H - 34 - SAFE.b, ayS + 52) : smY,
+          11.5, '#8affd4', 'center', 700);
       }
       txt('Enter 出击 · ESC 返回', cx, H - 14, 10, 'rgba(140,170,210,.45)', 'center', 500, true);
     } else if (G.tStage === 'duel') {
@@ -4476,7 +4553,7 @@ function drawOverlay() {
       ctx.shadowColor = '#ff9a3c'; ctx.shadowBlur = 16;
       txt('—— 种子对决 · SEED DUEL ——', cx, H * 0.055, 14, '#ff9a3c', 'center', 800);
       ctx.shadowBlur = 0;
-      txt(inv ? '⚡ 已从对决链接载入 · 同码同卷同词条同升级序列 · 出击即开卷'
+      txt(inv ? '⚡ 已从对决链接载入 · 同码同卷同词条 · 出击即开卷'
              : '生成你的对决码：seed/初始构筑/波次上限全部入码 · 成绩码回贴给对手定胜负',
         cx, H * 0.055 + 20, 11, 'rgba(255,200,150,.8)', 'center', 500);
       txt('SEED ' + duelSeedText(d.seed), cx, H * 0.055 + 46, 15, '#ffe9c2', 'center', 800, true);
@@ -4537,7 +4614,7 @@ function drawOverlay() {
         const mx2 = tb.x + tb.w / 2, my2 = tb.y + tb.h / 2;
         ctx.translate(mx2, my2); ctx.scale(1.05, 1.05); ctx.translate(-mx2, -my2);
       }
-      ctx.fillStyle = 'rgba(8,14,30,0.9)';
+      ctx.fillStyle = COL.panel;
       ctx.strokeStyle = hov ? '#ffffff' : tb.c;
       ctx.lineWidth = hov ? 2.5 : 1.5;
       rr(tb.x, tb.y, tb.w, tb.h, 10);
@@ -4548,11 +4625,18 @@ function drawOverlay() {
       if (hov) { ctx.shadowColor = tb.c; ctx.shadowBlur = 22; rr(tb.x, tb.y, tb.w, tb.h, 10); ctx.stroke(); ctx.shadowBlur = 0; }
       if (tb.s) {
         // 行高自适应：横屏手机压缩后的模式按钮（h≈38）也保持两行文字在框内
-        txt(tb.l, tb.x + tb.w / 2, tb.y + tb.h * 0.40, 15, '#f2fbff', 'center', 800);
-        txt(tb.s, tb.x + tb.w / 2, tb.y + tb.h * 0.75, 10, 'rgba(170,200,235,.7)', 'center', 500);
+        // [ELEG8-IA] f2/fs 允许小 chip（h32）与新手引导槽用更小字号；sc 允许副标题带分组色
+        txt(tb.l, tb.x + tb.w / 2, tb.y + tb.h * 0.40, tb.f2 || 15, COL.text, 'center', 800);
+        txt(tb.s, tb.x + tb.w / 2, tb.y + tb.h * 0.75, tb.fs || 10, tb.sc || 'rgba(170,200,235,.7)', 'center', 500);
       } else {
         // [FIX-COS3] 顶右小 chip 文字按 tb.f 用小字号，避免超出 chip/屏幕右缘被裁
-        txt(tb.l, tb.x + tb.w / 2, tb.y + tb.h / 2, tb.f || (tb.act === 'back' ? 11 : 16), tb.act === 'back' ? 'rgba(190,210,235,.8)' : '#f2fbff', 'center', 800);
+        txt(tb.l, tb.x + tb.w / 2, tb.y + tb.h / 2, tb.f || (tb.act === 'back' ? 11 : 16), tb.act === 'back' ? 'rgba(190,210,235,.8)' : COL.text, 'center', 800);
+      }
+      // [ELEG8-IA] 模式分组标签：标题行右端小字（悬停/选中提亮），与居中的标题无横向交集
+      if (tb.g) {
+        ctx.globalAlpha = (hov || tb.sel) ? 0.95 : 0.68;
+        txt('『' + tb.g + '』', tb.x + tb.w - 9, tb.y + tb.h * 0.40, 9, tb.gc || COL.cyan, 'right', 700);
+        ctx.globalAlpha = 1;
       }
       ctx.restore();
     }
@@ -4573,7 +4657,7 @@ function drawOverlay() {
         const col = i % cols, row = Math.floor(i / cols);
         const ax = x0 + col * (cw + gpx), ay = y0 + row * (chh + gpx);
         const got = G.ach.indexOf(a.k) >= 0;
-        ctx.fillStyle = 'rgba(8,14,30,0.9)';
+        ctx.fillStyle = COL.panel;
         ctx.strokeStyle = got ? a.c : 'rgba(110,130,160,.45)';
         ctx.lineWidth = got ? 1.8 : 1;
         rr(ax, ay, cw, chh, 8); ctx.fill(); ctx.stroke();
@@ -4602,8 +4686,12 @@ function drawOverlay() {
         txt('击杀拾取水晶 · 升级三选一 · 构筑你的流派', cx, py0 + 38, 12, 'rgba(160,195,235,.6)', 'center', 500);
       }
     }
-    // [FIX-COS8] 榜块绘制门：成就页不画（原样）；设置页在 setGeom 判定放不下时本页隐藏，其余照旧
-    if (G.tStage !== 'ach' && H > 430 && !(G.tStage === 'set' && !setGeom().honFit)) {
+    // [FIX-COS8] 榜块绘制门：成就页不画（原样）；设置页在 setGeom 判定放不下时本页隐藏，其余照旧。
+    // [ELEG8-GATE] brb/duel/duelres/ghost 四个整页自绘子页也不画：这些子页底部有自己的动作按钮带
+    // （构建器 H*0.49+86 起、对决构建器 H*0.80、残影 H*0.425+64+行高），榜块（H*0.80 起 +51px）
+    // 与按钮同带重叠、且榜块本就不属于子页信息——整页 UI 一律让位不画。
+    if (G.tStage !== 'ach' && G.tStage !== 'brb' && G.tStage !== 'duel' && G.tStage !== 'duelres' &&
+        G.tStage !== 'ghost' && H > 430 && !(G.tStage === 'set' && !setGeom().honFit)) {
       if (G.tSel === 'daily' && G.daily && G.daily.rows.length) {
         txt('── 每日挑战 · 今日排行 · ' + G.daily.date + ' ──', cx, H * 0.80, 10.5, 'rgba(120,230,180,.6)', 'center', 600);
         const dn2 = Math.min(3, G.daily.rows.length);
@@ -4633,7 +4721,7 @@ function drawOverlay() {
     // 页脚基线在 H-14 直接从按钮下穿过 → 这些自绘子页一律让位不画页脚（各自已有返回按钮/页内提示）
     if (G.tStage !== 'brb' && G.tStage !== 'ach' && G.tStage !== 'set' && G.tStage !== 'guide' &&
         G.tStage !== 'credits' && G.tStage !== 'ghost' && G.tStage !== 'duel' && G.tStage !== 'duelres') {
-      txt('P 暂停 · M 静音 · A 成就 · G 指南 · S 设置 · C 关于 · B 构建器 · NEON VOID v1.5.0', cx, H - 14, 10, 'rgba(140,170,210,.4)', 'center', 500, true);
+      txt('P 暂停 · M 静音 · A 成就 · G 指南 · S 设置 · C 关于 · B 构建器 · NEON VOID v1.5.1', cx, H - 14, 10, 'rgba(140,170,210,.4)', 'center', 500, true);
     }
   } else if (G.state === 'levelup') {
     ctx.fillStyle = 'rgba(3,5,16,.8)';
@@ -4655,7 +4743,7 @@ function drawOverlay() {
         const mx2 = c.x + c.w / 2, my2 = c.y + c.h / 2;
         ctx.translate(mx2, my2); ctx.scale(1.04, 1.04); ctx.translate(-mx2, -my2);
       }
-      ctx.fillStyle = 'rgba(8,14,30,0.92)';
+      ctx.fillStyle = COL.panelHi;
       ctx.strokeStyle = hov ? '#ffffff' : c.u.c;
       ctx.lineWidth = hov ? 2.5 : 1.5;
       rr(c.x, c.y, c.w, c.h, 10);
@@ -4690,7 +4778,7 @@ function drawOverlay() {
     if (G.rrBtn) {
       const rb = G.rrBtn;
       const can = G.rerolls > 0;
-      ctx.fillStyle = 'rgba(8,14,30,0.9)';
+      ctx.fillStyle = COL.panel;
       ctx.strokeStyle = can ? '#7db4ff' : 'rgba(120,140,170,.4)';
       ctx.lineWidth = 1.5;
       rr(rb.x, rb.y, rb.w, rb.h, 8);
@@ -4725,7 +4813,7 @@ function drawOverlay() {
         const mx2 = wb.x + wb.w / 2, my2 = wb.y + wb.h / 2;
         ctx.translate(mx2, my2); ctx.scale(1.05, 1.05); ctx.translate(-mx2, -my2);
       }
-      ctx.fillStyle = 'rgba(8,14,30,0.92)';
+      ctx.fillStyle = COL.panelHi;
       ctx.strokeStyle = hov ? '#ffffff' : wb.c;
       ctx.lineWidth = hov ? 2.5 : 1.5;
       rr(wb.x, wb.y, wb.w, wb.h, 10);
@@ -4764,10 +4852,13 @@ function drawOverlay() {
     const g = (G.time * 7) % 1 < 0.15;
     const ox = g ? R(-3, 3) : 0, oy = g ? R(-2, 2) : 0;
     if (G.won) {
-      ctx.shadowColor = G.mode === 'ghost' ? '#8affd4' : '#ffc233'; ctx.shadowBlur = 26;
-      txt(G.mode === 'boss' ? '全灭达成' : G.mode === 'versus' ? 'P1 获胜' : G.mode === 'ghost' ? '残影讨伐' : '虚空肃清', cx + ox, H * 0.22 + oy, 44, G.mode === 'ghost' ? '#8affd4' : '#ffc233', 'center', 900);
+      // [ELEG8-OVER] 结算标题统一走 overTitle()（与 winGame 横幅同口径）：旧版 brb/duel 胜利时
+      // 落到兜底文案「虚空肃清 / SECTOR CLEARED」，与横幅「全灭达成/对决完成」自相矛盾
+      const ot = overTitle();
+      ctx.shadowColor = G.mode === 'ghost' ? '#8affd4' : COL.gold; ctx.shadowBlur = 26;
+      txt(ot[0], cx + ox, H * 0.22 + oy, 44, G.mode === 'ghost' ? '#8affd4' : COL.gold, 'center', 900);
       ctx.shadowBlur = 0;
-      txt(G.mode === 'boss' ? 'A L L   B O S S E S   D O W N' : G.mode === 'versus' ? 'S H I P   W I N S' : G.mode === 'ghost' ? 'G H O S T   S L A I N' : 'S E C T O R   C L E A R E D', cx, H * 0.22 + 34, 13, 'rgba(255,210,120,.9)', 'center', 600, true, 4);
+      txt(ot[1], cx, H * 0.22 + 34, 13, 'rgba(255,210,120,.9)', 'center', 600, true, 4);
     } else {
       ctx.shadowColor = G.mode === 'ghost' ? '#ff6688' : '#ff3355'; ctx.shadowBlur = 22;
       txt(G.mode === 'ghost' ? '残影反噬' : '信号丢失', cx + ox, H * 0.22 + oy, 44, G.mode === 'ghost' ? '#ff6688' : '#ff3355', 'center', 900);
@@ -4892,7 +4983,7 @@ function drawOverlay() {
     for (const ob of overBtns()) {
       const hov = mouse.x >= ob.x && mouse.x <= ob.x + ob.w && mouse.y >= ob.y && mouse.y <= ob.y + ob.h;
       ctx.save();
-      ctx.fillStyle = 'rgba(8,14,30,0.92)';
+      ctx.fillStyle = COL.panelHi;
       ctx.strokeStyle = hov ? '#ffffff' : ob.c;
       ctx.lineWidth = hov ? 2.5 : 1.5;
       rr(ob.x, ob.y, ob.w, ob.h, 9);
@@ -4995,7 +5086,7 @@ function render() {
 /* ================= input ================= */
 const keys = new Set();
 const mouse = { x: 400, y: 250, inside: false };
-const joy = { id: null, sx: 0, sy: 0, dx: 0, dy: 0 };
+const joy = { id: null, sx: 0, sy: 0, dx: 0, dy: 0, used: false }; // used：本局是否已用过摇杆（提示行隐）
 function touchBtns() {
   // [FIX-MOB2] 手机横屏（矮视口）按钮半径 25→28：可按面积 +25%，键心距 64px 仍无重叠；
   // [FIX-MOB1] 右/下按安全区内缩，不钻刘海与手势条
@@ -5097,7 +5188,9 @@ function titleBtns() {
     const ord = cfg.order || [];
     const pw = Math.min(170, (W - 90) / 3 - 8), ph = Math.max(36, Math.min(44, H * 0.09));
     const pgap = 8;
-    const py0 = H * 0.115;
+    // [ELEG8-BRB] 矮视口（H=390）时 H*0.115=44.9 与说明行底缘（H*0.055+20 基线 ≈ 44）几乎贴死，
+    // 真机字体度量稍大就会把说明行降部压进卡片上边框 → 卡片顶不高于「说明行基线 + 14」
+    const py0 = Math.max(H * 0.115, H * 0.055 + 34);
     const out2 = [];
     BOSSK.forEach((kd, i) => {
       const col = i % 3, row = Math.floor(i / 3);
@@ -5171,21 +5264,31 @@ function titleBtns() {
     const y0 = H * 0.455;
     const avail = H * 0.90 - SAFE.b - y0;
     if (rows * (bh + gap) - gap > avail) { gap = 6; bh = Math.max(30, Math.floor((avail - (rows - 1) * gap) / rows)); }
+    /* [ELEG8-IA] 顶右 chip 改为固定双列三行：col1 = 成就/指南/设置（h26），col2 = 构建器/种子对决/
+       残影悬赏（h32 + 分组副标题）。旧版残影码在场时会把种子对决 chip 推到第三列（W-382），
+       844 宽下左缘 462 深入大 logo 字身（logo 右端 ≈ cx+130）；固定双列后 chip 最左 = W-256，
+       永远在 logo 右侧，杜绝「chip 压 logo」。分组副标题让 chip 也带上 IA 分组。 */
     const chips = [
-      { x: W - 130 - SAFE.r, y: 12 + SAFE.t, w: 118, h: 26, act: 'ach', l: '🏆 成就 ' + G.ach.length + '/' + ACHV.length, c: '#ffc233', f: 11 },
-      { x: W - 130 - SAFE.r, y: 44 + SAFE.t, w: 118, h: 26, act: 'guide', l: '📖 玩法指南 · G', c: '#4de3ff', f: 11 },
+      { x: W - 130 - SAFE.r, y: 12 + SAFE.t, w: 118, h: 26, act: 'ach', l: '🏆 成就 ' + G.ach.length + '/' + ACHV.length, c: COL.gold, f: 11 },
+      { x: W - 130 - SAFE.r, y: 44 + SAFE.t, w: 118, h: 26, act: 'guide', l: '📖 玩法指南 · G', c: COL.cyan, f: 11 },
       { x: W - 130 - SAFE.r, y: 76 + SAFE.t, w: 118, h: 26, act: 'set', l: '⚙ 设置 SETTINGS', c: '#9fdcff', f: 11 },
-      { x: G.ghost || G.duelInv ? W - 256 - SAFE.r : W - 130 - SAFE.r, y: 108 + SAFE.t, w: 118, h: 26, act: 'brb', l: '🛠 连战构建器', c: '#38c8ff', f: 11 }
+      { x: W - 256 - SAFE.r, y: 12 + SAFE.t, w: 118, h: 32, act: 'brb', l: '🛠 连战构建器', s: MODE_GROUPS.adv[0], sc: MODE_GROUPS.adv[1], c: '#38c8ff', f: 11, f2: 11, fs: 9 },
+      { x: W - 256 - SAFE.r, y: 48 + SAFE.t, w: 118, h: 32, act: 'duel', l: '⚔ 种子对决', s: MODE_GROUPS.ritual[0], sc: MODE_GROUPS.ritual[1], c: COL.orange, f: 11, f2: 11, fs: 9 }
     ];
-    if (G.ghost) chips.push({ x: W - 130 - SAFE.r, y: 108 + SAFE.t, w: 118, h: 26, act: 'ghost', l: '☠ 残影悬赏', c: '#8affd4', f: 11 });
-    // 种子对决入口（对决码家族的创建端）：常驻第二列，残影码在第一列时让到第三列，互不重叠
-    chips.push({ x: G.ghost ? W - 382 - SAFE.r : W - 256 - SAFE.r, y: 108 + SAFE.t, w: 118, h: 26,
-      act: 'duel', l: '⚔ 种子对决', c: '#ff9a3c', f: 11 });
-    return chips.concat(MODES.map((m, i) => {
+    if (G.ghost) chips.push({ x: W - 256 - SAFE.r, y: 84 + SAFE.t, w: 118, h: 32, act: 'ghost', l: '☠ 残影悬赏', s: MODE_GROUPS.vs[0], sc: MODE_GROUPS.vs[1], c: '#8affd4', f: 11, f2: 11, fs: 9 });
+    const modeBtns = MODES.map((m, i) => {
       const col = i % 2, row = Math.floor(i / 2);
+      const gg = MODE_GROUPS[m.g];
       return { x: W / 2 + (col ? 5 : -bw - 5), y: y0 + row * (bh + gap), w: bw, h: bh,
-        act: 'mode:' + m.k, l: m.key + ' · ' + m.n, s: m.d, c: m.c };
-    }));
+        act: 'mode:' + m.k, l: m.key + ' · ' + m.n, s: m.d, c: m.c, g: gg[0], gc: gg[1], sel: G.tSel === m.k };
+    });
+    // [ELEG8-IA] 首次启动引导：第 8 个网格槽（右列第 4 行）平时空置 → 新档在这里放一条
+    // 「推荐从经典战役开始」提示（可点击直达），完成任意一局（recordScore 落档）后不再出现
+    if (G.firstRun) {
+      modeBtns.push({ x: W / 2 + 5, y: y0 + 3 * (bh + gap), w: bw, h: bh, act: 'mode:classic',
+        l: '👉 新手从这里开始', s: '推荐先玩「1 · 经典战役」· 打完一局后本提示消失', c: COL.cyan, f2: 14, fs: 9.5, hint: true });
+    }
+    return chips.concat(modeBtns);
   }
   const bw = Math.min(170, (W - 80) / 2), bh = 42, y = H * 0.525;
   const pbtns = [
@@ -5271,7 +5374,7 @@ function titleAct(a) {
     if (!G.duel) { G.duelShareMsg = '先设定对决参数'; uiClick(); return; }
     const code = duelPack(G.duel);
     copyText(duelURL(code), ok => {
-      G.duelShareMsg = ok ? '✓ 对决链接已复制 · 发给对手，同码同卷同升级序列' : '复制失败 · 对决码 ' + code;
+      G.duelShareMsg = ok ? '✓ 对决链接已复制 · 发给对手，同码同卷同词条' : '复制失败 · 对决码 ' + code;
     });
     uiClick();
     return;
@@ -5361,7 +5464,7 @@ function handleKey(code) {
     return;
   }
   if (code === 'KeyC' && G.state === 'over' && G.over > 0.7) {
-    copyText(battleReport(), ok => addText(W / 2, H * 0.78, ok ? '✓ 战报已复制到剪贴板' : '复制失败，请手动截图', ok ? '#3dff9e' : '#ff6688', 15));
+    copyText(battleReport(), ok => toast(ok ? '✓ 战报已复制到剪贴板' : '复制失败，请手动截图', ok ? '#3dff9e' : '#ff6688'));
     uiClick();
     return;
   }
@@ -5506,7 +5609,7 @@ cv.addEventListener('pointerdown', (e) => {
         return;
       }
     }
-    if (px < W * 0.55) { joy.id = e.pointerId; joy.sx = px; joy.sy = py; joy.dx = 0; joy.dy = 0; }
+    if (px < W * 0.55) { joy.id = e.pointerId; joy.sx = px; joy.sy = py; joy.dx = 0; joy.dy = 0; joy.used = true; }
     return;
   }
   mouse.x = px; mouse.y = py; mouse.inside = true;
