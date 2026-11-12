@@ -4553,7 +4553,7 @@ function drawOverlay() {
       ctx.shadowColor = '#ff9a3c'; ctx.shadowBlur = 16;
       txt('—— 种子对决 · SEED DUEL ——', cx, H * 0.055, 14, '#ff9a3c', 'center', 800);
       ctx.shadowBlur = 0;
-      txt(inv ? '⚡ 已从对决链接载入 · 同码同卷同词条 · 出击即开卷'
+      txt(inv ? '⚡ 已从对决链接载入 · 同码同卷同词条同随机流（升级三选一同池，序列随对局节奏） · 出击即开卷'
              : '生成你的对决码：seed/初始构筑/波次上限全部入码 · 成绩码回贴给对手定胜负',
         cx, H * 0.055 + 20, 11, 'rgba(255,200,150,.8)', 'center', 500);
       txt('SEED ' + duelSeedText(d.seed), cx, H * 0.055 + 46, 15, '#ffe9c2', 'center', 800, true);
@@ -4960,25 +4960,36 @@ function drawOverlay() {
     // 悬赏码 / 击杀链提示
     let hintY = Math.min(H * 0.78, btnY - 74);
     if (compact) hintY = Math.max(hintY, rowEnd + 8);
+    // [FIX-COS13] 矮视口底部三行统一让位预算（[FIX-COS12] 残留修复）：上版只让了提示行，顶部荣誉行
+    // 最多的极端场景（每日+影子对照，rowEnd≈308）里 CTA(hintY+24≈340) 与钳到带顶的提示行(≈341)
+    // 中心只差 1px 完全叠印。现把「悬赏提示 / CTA / C·T 提示行」当整体自下而上排：
+    //   提示行底 ≤ 带顶-1 → ctaY ≤ btnY-31（提示行恒在 CTA 下方 24px 中心距，行间净空 ~11px）；
+    //   CTA 顶与悬赏提示底留 ≥2px → 三行放得下的条件是 hintY ≤ btnY-46；
+    //   放不下时悬赏提示整行让位不画（同一动作仍在按钮带「☠ 悬赏码 · B」），保 CTA 与热键提示两行。
+    // 桌面（H≥560）几何保持原样不受钳制。
+    const stackFits = !compact || hintY <= btnY - 46;
     let hintDrawn = false;
-    if (G.mode === 'ghost' && G.won && G.chainCode) {
+    if (stackFits && G.mode === 'ghost' && G.won && G.chainCode) {
       const pn = G.ghost ? G.ghost.chain + 1 : 1;
       const p3 = 0.5 + 0.5 * Math.sin(G.time * 4);
       txt('☠ 新悬赏码已就绪 · 击杀链 #' + pn + ' · 按 B 复制，把你的残影传给下一位猎人', cx, hintY, 13,
         'rgba(138,255,212,' + (0.65 + 0.35 * p3) + ')', 'center', 700, true);
       hintDrawn = true;
-    } else if (G.mode === 'duel' && G.duelRun) {
+    } else if (stackFits && G.mode === 'duel' && G.duelRun) {
       const p3 = 0.5 + 0.5 * Math.sin(G.time * 4);
       txt('⚔ 成绩码已就绪 · 按 D 复制回贴给对手 · 双方各开对方成绩码即判胜负', cx, hintY, 13,
         'rgba(255,206,154,' + (0.65 + 0.35 * p3) + ')', 'center', 700, true);
       hintDrawn = true;
-    } else if (canIssueBounty()) {
+    } else if (stackFits && canIssueBounty()) {
       txt('☠ 按 B 生成残影悬赏码 · 把这局构筑变成别人必须面对的 BOSS', cx, hintY, 12, 'rgba(138,255,212,.75)', 'center', 600, true);
       hintDrawn = true;
     }
-    const ctaY = compact ? (hintDrawn ? hintY + 24 : Math.min(H * 0.87, rowEnd + 30)) : H * 0.87;
+    const ctaY = compact ? Math.min(hintDrawn ? hintY + 24 : Math.min(H * 0.87, rowEnd + 30), btnY - 31) : H * 0.87;
     txt('点击 或 按 R 重新出击 · PRESS R TO RETRY', cx, ctaY, compact ? 13 : 15, 'rgba(255,255,255,' + (0.45 + 0.55 * p2) + ')', 'center', 700);
-    txt('按 C 复制战报 · 按 T 返回主界面', cx, ctaY + 24, 12, 'rgba(150,190,240,.75)', 'center', 600);
+    // [FIX-COS12→13] 提示行随 CTA 走：ctaY 已受 btnY-31 钳制 → 提示行自然落在带顶上方 ≥7px，
+    // 与 CTA 中心距恒 24px（不再需要独立钳制，也不会再出现 1px 叠印）。
+    const hintRowY = ctaY + 24;
+    txt('按 C 复制战报 · 按 T 返回主界面', cx, hintRowY, 12, 'rgba(150,190,240,.75)', 'center', 600);
     // 结算操作按钮（悬赏码 / 海报 / 战报）
     for (const ob of overBtns()) {
       const hov = mouse.x >= ob.x && mouse.x <= ob.x + ob.w && mouse.y >= ob.y && mouse.y <= ob.y + ob.h;
@@ -5374,7 +5385,7 @@ function titleAct(a) {
     if (!G.duel) { G.duelShareMsg = '先设定对决参数'; uiClick(); return; }
     const code = duelPack(G.duel);
     copyText(duelURL(code), ok => {
-      G.duelShareMsg = ok ? '✓ 对决链接已复制 · 发给对手，同码同卷同词条' : '复制失败 · 对决码 ' + code;
+      G.duelShareMsg = ok ? '✓ 对决链接已复制 · 发给对手，同码同卷同词条同随机流（升级三选一同池，序列随对局节奏）' : '复制失败 · 对决码 ' + code;
     });
     uiClick();
     return;
@@ -5858,7 +5869,7 @@ schedule();
 /* [NV-DBG] 只读自检钩子：验收脚本用（快照战场/升级序列、注入测试输入）。不参与任何游戏逻辑，
    生产路径零调用；只读写游戏已有状态，不触碰存档格式与悬赏码。 */
 window.NV_SNAP = () => ({
-  state: G.state, mode: G.mode, wave: G.wave, score: Math.floor(G.score), level: G.level,
+  state: G.state, mode: G.mode, won: G.won, wave: G.wave, score: Math.floor(G.score), level: G.level,
   muts: G.muts.slice(), mutE: G.mutE.slice(), seed: RSTATE >>> 0, tier: G.tier, q: G.q,
   ebCap: EB_CAP, ftEma: Math.round(G.ftEma * 100) / 100,
   enemies: enemies.map(e => [e.t, e.elite ? 1 : 0, Math.round(e.x * 4) / 4, Math.round(e.y * 4) / 4, e.hp, e.maxhp, Math.round(e.sp * 100) / 100]),
@@ -5880,6 +5891,7 @@ window.NV_CHEAT = {
   lowNow: () => { G.tLow = 10.01; G.tHigh = 0; }, // 直接满足降档持时（跳过 10s 等待）
   highNow: () => { G.tHigh = 20.01; G.tLow = 0; }, // 直接满足回升持时
   kill: () => { G.lives = 1; hurtShip(player); }, // 测试专用速死走 recordScore（验证 dstat/成就/结算链路）
+  hp1: () => { if (G.boss) G.boss.hp = 1; },     // 测试专用：残影/连战 BOSS 血量置 1（走真实受击死亡→winGame 路径）
   tier: () => G.tier
 };
 })();
