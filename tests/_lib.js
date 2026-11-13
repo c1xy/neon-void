@@ -142,17 +142,14 @@ function buildDstatStreak(env) {
     'G.dstat = ds;', true);
   const factory = new Function('G', 'sanitizeDstat', 'dateStr', 'pad', 'Date', 'rec2',
     '"use strict";\nreturn function streakTick() {\n' + block + '\n};');
-  const api = buildSandbox(env).api;
   return {
-    api,
+    api: buildSandbox(env).api,
+    /* tick 注入的 DateImpl 必须同时喂给沙箱本体：dateStr() 内部 new Date() 取「今天」，
+       旧版沙箱用真实 Date → dateStr 与切片内注入的 FakeDate 各说各话，跨日即 time-bomb
+       （2026-11-14 起整组 dstat 断言翻车的根因） */
     tick(G, DateImpl, rec2) {
-      // [FIX-DATE1] 注入日期必须同时喂给切片内的两条 Date 通道：块内的 new Date()（昨日推算）
-      // 与 dateStr()（今日取整——源码切片函数体里的 new Date() 走沙盒 Date 参数）。
-      // 此前只喂了前者，dateStr 永远吃真实日期：测试写于 2026-11-13 时与注入日期碰巧同日而绿，
-      // 次日起 5 个 dstat 用例必挂。按 tick 日期重建沙盒，两者同源。
-      const D = DateImpl || (env && env.Date) || Date;
-      const api2 = buildSandbox(Object.assign({}, env, { Date: D })).api;
-      const fn = factory(G, api2.sanitizeDstat, api2.dateStr, api2.pad, D,
+      const sb = buildSandbox({ ...env, Date: DateImpl || (env && env.Date) || Date });
+      const fn = factory(G, sb.api.sanitizeDstat, sb.api.dateStr, sb.api.pad, DateImpl || (env && env.Date) || Date,
         rec2 || { s: 0, w: 0, t: 0 });
       fn();
       return G.dstat;

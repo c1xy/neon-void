@@ -2,7 +2,7 @@
    单文件游戏的离线缓存：stale-while-revalidate，hash 参数不影响命中（# 不发往网络）
    [FIX-SW1] 每次发版必须递增 CACHE 版本号：activate 清掉旧缓存，已打开的旧标签页
    下一次请求即换新版本，避免修复后的代码被旧缓存持续顶住（白屏旧案复发通道） */
-const CACHE = 'neon-void-v12'; // v1.5.1 清零轮：种子对决构建页提示合并/间距 + e2e 画质用例健壮化（发版必递增）
+const CACHE = 'neon-void-v12'; // v1.5.1 R11 清零：设置页 shake/scan 开关语义（CFG2）+ compact 行盒交叠（GEOM1）+ 对决构建页标签让位（DUEL1）+ 性能基线测试（发版必递增）
 const CORE = ['./', './index.html'];
 
 self.addEventListener('install', (e) => {
