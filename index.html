@@ -4549,7 +4549,7 @@ function drawOverlay() {
       const d = G.duel || { seed: 0, lv: [], cap: 10 };
       const cardN = UPGRADES.length;
       const lvSum = d.lv ? d.lv.reduce((a, b) => a + (b || 0), 0) : 0;
-      const gy0 = H * 0.055 + (inv ? 86 : 150); // 构筑网格顶（builder 上方多两行按钮）
+      const gy0 = H * 0.055 + (inv ? 86 : 156); // 构筑网格顶（builder 上方多两行按钮；156 与档位行留 ≥10px 呼吸间距）
       ctx.shadowColor = '#ff9a3c'; ctx.shadowBlur = 16;
       txt('—— 种子对决 · SEED DUEL ——', cx, H * 0.055, 14, '#ff9a3c', 'center', 800);
       ctx.shadowBlur = 0;
@@ -4559,8 +4559,8 @@ function drawOverlay() {
       txt('SEED ' + duelSeedText(d.seed), cx, H * 0.055 + 46, 15, '#ffe9c2', 'center', 800, true);
       txt(inv ? '固定种子 · 全员同卷 · 波次上限 ' + d.cap + ' 波 · 打满即对决完成'
              : '换种子：🎲 随机 / 📅 今日日期（与每日挑战同款播种）', cx, H * 0.055 + 64, 10.5, 'rgba(200,220,250,.55)', 'center', 500);
-      if (!inv) txt('波次上限（打满即对决完成）', cx, H * 0.055 + 138, 10.5, 'rgba(255,220,180,.7)', 'center', 600);
-      txt((inv ? '对手的初始构筑' : '初始构筑（点击卡片循环等级 0→max→0）') + ' · 共 ' + lvSum + ' 级',
+      // 波次上限说明并入构筑行（原独立行与构筑行中心距仅 2px 恒叠印；与档位按钮行也仅 ~3px 挤压）
+      txt((inv ? '对手的初始构筑' : '波次上限（打满即对决完成） · 初始构筑（点击卡片循环等级 0→max→0）') + ' · 共 ' + lvSum + ' 级',
         cx, gy0 - 10, 11, '#cfe8ff', 'center', 700, true);
       // 对决史（本机最近 3 条；loadDuels 在进页/入档时刷新，渲染帧只读内存）
       if (G.duels.length) {
@@ -5245,7 +5245,7 @@ function titleBtns() {
     }
     const gc = 7;
     const chw = Math.min(112, (W - 56) / gc - 6), chh = 27, cg = 4;
-    const gy0 = H * 0.055 + (inv ? 86 : 150);
+    const gy0 = H * 0.055 + (inv ? 86 : 156);
     const gx0 = W / 2 - (chw * gc + cg * (gc - 1)) / 2;
     UPGRADES.forEach((u, i) => {
       const lv = (d.lv && d.lv[i]) || 0;

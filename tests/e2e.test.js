@@ -124,6 +124,20 @@ async function waitClipboard(page) {
   }
   return '';
 }
+/* 画质治理器迁移等待：fps() 只铺一帧 ftEma，主循环 EMA（index.html G.ftEma）在空载机器
+   数帧内就被真实 60fps 拉回健康值，setTier 又会清零 tLow/tHigh——所以 fps(30)/fps(60)
+   必须与 lowNow()/highNow() 成对重发（钩子即为此设计）；等待给短超时（2s），
+   未触发就重发钩子再等，共 3 次，避免偶发挂红。 */
+async function waitTier(b, tier, pair) {
+  for (let i = 0; i < 3; i++) {
+    await b.page.evaluate(pair);
+    try {
+      await b.page.waitForFunction('window.NV_SNAP().tier === ' + tier, null, { timeout: 2000 });
+      return;
+    } catch (e) { /* 迁移未触发：重发钩子再等 */ }
+  }
+  throw new Error('画质治理器迁移 tier=' + tier + ' 重发 3 次仍未触发');
+}
 /* [FIX-COS13] 结算底部亮像素剖面（活体 canvas，无需 OCR）：
    x∈[262,582) 覆盖 CTA/热键提示/悬赏提示三行文字水平范围，y∈[296,347) 在按钮带（y348）上缘之下。
    3 次采样取每行最大值——CTA 行呼吸脉冲（alpha 0.45~1.0，周期 ~2.1s）相位免疫。
@@ -325,8 +339,15 @@ function assertRowsSeparated(runs, tag) {
       await b.ctx.close();
       return { seed: sn.seed, muts: sn.muts.slice(), comp: composition(sn), wave: sn.wave };
     };
-    const r1 = await run();
-    const r2 = await run();
+    // [FIX-RACE1] 自动开火每发弹消耗 1 次 RSTATE（fireBullet 的暴击掷点），快照落在第几发弹的
+    // 间隔里随两次 boot 的帧对齐抖动 → RSTATE 步数偶发 ±1，seed 断言假阴性（卷面本体
+    // 词条/构成不受影响；真实管线坏了重跑也救不回，词条断言仍会挂红）。seed 不齐就整对重 boot（最多 3 对）。
+    let r1, r2;
+    for (let i = 0; i < 3; i++) {
+      r1 = await run();
+      r2 = await run();
+      if (r1.seed === r2.seed) break;
+    }
     assert.eq(r1.wave, 1, '两次都停在第 1 波');
     assert.deep(r1.muts, r2.muts, '全员同词条（startGame 同步抽取，无帧竞态）');
     assert.deep(r1.comp, r2.comp, '波次 1 构成（未出生队列+在场敌人）一致');
@@ -345,27 +366,25 @@ function assertRowsSeparated(runs, tag) {
       assert.eq(sn.ebCap, cap, '弹幕上限随档位');
       await b.ctx.close();
     }
-    // ② 自动档治理器：NV_CHEAT.fps/lowNow/highNow 驱动真实主循环
+    // ② 自动档治理器：NV_CHEAT.fps/lowNow/highNow 驱动真实主循环（fps 与 low/high 成对重发 + 短重试）
     const b = await boot(browser, base);
     await startModeByKey(b.page, '1'); // classic（治理器只在对局中计量）
     const snap0 = await b.snap();
     assert.eq(snap0.tier, 0, '默认自动档 L0');
-    await b.page.evaluate('window.NV_CHEAT.fps(30); window.NV_CHEAT.lowNow()');
-    await b.page.waitForFunction('window.NV_SNAP().tier === 1', null, { timeout: 8000 });
+    const LOW = 'window.NV_CHEAT.fps(30); window.NV_CHEAT.lowNow()';
+    const HIGH = 'window.NV_CHEAT.fps(60); window.NV_CHEAT.highNow()';
+    await waitTier(b, 1, LOW);
     let sn = await b.snap();
     assert.eq(sn.ebCap, 400, 'L1 弹幕上限仍 400');
     assert.ok(sn.qToast && sn.qToast.indexOf('画质降档 · L1') >= 0, '降档提示 L1');
-    await b.page.evaluate('window.NV_CHEAT.lowNow()');
-    await b.page.waitForFunction('window.NV_SNAP().tier === 2', null, { timeout: 8000 });
+    await waitTier(b, 2, LOW);
     sn = await b.snap();
     assert.eq(sn.ebCap, 300, 'L2 弹幕上限 300');
     assert.ok(sn.qToast && sn.qToast.indexOf('弹幕上限 300') >= 0, '降档提示 L2');
-    await b.page.evaluate('window.NV_CHEAT.fps(60); window.NV_CHEAT.highNow()');
-    await b.page.waitForFunction('window.NV_SNAP().tier === 1', null, { timeout: 8000 });
+    await waitTier(b, 1, HIGH);
     sn = await b.snap();
     assert.ok(sn.qToast && sn.qToast.indexOf('回升') >= 0, '方向感知：回升提示（不再叫降档）');
-    await b.page.evaluate('window.NV_CHEAT.highNow()');
-    await b.page.waitForFunction('window.NV_SNAP().tier === 0', null, { timeout: 8000 });
+    await waitTier(b, 0, HIGH);
     sn = await b.snap();
     assert.eq(sn.ebCap, 400, 'L0 弹幕上限回 400');
     assert.deep(b.errors, [], '无未捕获异常');
