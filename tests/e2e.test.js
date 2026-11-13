@@ -57,7 +57,9 @@ async function launchBrowser(pw) {
     try {
       return await pw.chromium.launch({
         headless: true,
-        args: ['--autoplay-policy=no-user-gesture-required', '--disable-dev-shm-usage'],
+        // --enable-precise-memory-info：performance.memory.usedJSHeapSize 精确到字节（缺省分桶近似，
+        // 性能基线的 heap 断言需要真值）
+        args: ['--autoplay-policy=no-user-gesture-required', '--disable-dev-shm-usage', '--enable-precise-memory-info'],
         ...opt
       });
     } catch (e) { errs.push((opt.channel || 'bundled') + ': ' + String(e.message || e).split('\n')[0]); }
@@ -123,20 +125,6 @@ async function waitClipboard(page) {
     if (t) return t;
   }
   return '';
-}
-/* 画质治理器迁移等待：fps() 只铺一帧 ftEma，主循环 EMA（index.html G.ftEma）在空载机器
-   数帧内就被真实 60fps 拉回健康值，setTier 又会清零 tLow/tHigh——所以 fps(30)/fps(60)
-   必须与 lowNow()/highNow() 成对重发（钩子即为此设计）；等待给短超时（2s），
-   未触发就重发钩子再等，共 3 次，避免偶发挂红。 */
-async function waitTier(b, tier, pair) {
-  for (let i = 0; i < 3; i++) {
-    await b.page.evaluate(pair);
-    try {
-      await b.page.waitForFunction('window.NV_SNAP().tier === ' + tier, null, { timeout: 2000 });
-      return;
-    } catch (e) { /* 迁移未触发：重发钩子再等 */ }
-  }
-  throw new Error('画质治理器迁移 tier=' + tier + ' 重发 3 次仍未触发');
 }
 /* [FIX-COS13] 结算底部亮像素剖面（活体 canvas，无需 OCR）：
    x∈[262,582) 覆盖 CTA/热键提示/悬赏提示三行文字水平范围，y∈[296,347) 在按钮带（y348）上缘之下。
@@ -334,20 +322,22 @@ function assertRowsSeparated(runs, tag) {
     const run = async () => {
       const b = await boot(browser, base);
       await startModeByKey(b.page, '5'); // 每日挑战
-      await b.page.waitForTimeout(400);  // 首个出兵延迟 ~1.15s 未到 → 队列未消耗
-      const sn = await b.snap();
+      // 快照与「观察到 playing」同一页帧完成（evaluate 内 rAF 轮询取样）。旧版固定睡 400ms 再取：
+      // 负载下页面往返把取样推过首个出兵延迟（~1.15s）→ 出兵消耗 rnd() → RSTATE 状态快照漂移
+      // → 偶发翻车（run-all 连跑时实发过一次）。startGame 同步跑完 startWave(1) 才置 playing，
+      // 队列/词条在 playing 首帧前已就绪，立即取样即确定性。
+      const sn = await b.page.evaluate(() => new Promise(res => {
+        const tick = () => {
+          const s = window.NV_SNAP();
+          if (s && s.state === 'playing') res(s); else requestAnimationFrame(tick);
+        };
+        tick();
+      }));
       await b.ctx.close();
       return { seed: sn.seed, muts: sn.muts.slice(), comp: composition(sn), wave: sn.wave };
     };
-    // [FIX-RACE1] 自动开火每发弹消耗 1 次 RSTATE（fireBullet 的暴击掷点），快照落在第几发弹的
-    // 间隔里随两次 boot 的帧对齐抖动 → RSTATE 步数偶发 ±1，seed 断言假阴性（卷面本体
-    // 词条/构成不受影响；真实管线坏了重跑也救不回，词条断言仍会挂红）。seed 不齐就整对重 boot（最多 3 对）。
-    let r1, r2;
-    for (let i = 0; i < 3; i++) {
-      r1 = await run();
-      r2 = await run();
-      if (r1.seed === r2.seed) break;
-    }
+    const r1 = await run();
+    const r2 = await run();
     assert.eq(r1.wave, 1, '两次都停在第 1 波');
     assert.deep(r1.muts, r2.muts, '全员同词条（startGame 同步抽取，无帧竞态）');
     assert.deep(r1.comp, r2.comp, '波次 1 构成（未出生队列+在场敌人）一致');
@@ -366,25 +356,27 @@ function assertRowsSeparated(runs, tag) {
       assert.eq(sn.ebCap, cap, '弹幕上限随档位');
       await b.ctx.close();
     }
-    // ② 自动档治理器：NV_CHEAT.fps/lowNow/highNow 驱动真实主循环（fps 与 low/high 成对重发 + 短重试）
+    // ② 自动档治理器：NV_CHEAT.fps/lowNow/highNow 驱动真实主循环
     const b = await boot(browser, base);
     await startModeByKey(b.page, '1'); // classic（治理器只在对局中计量）
     const snap0 = await b.snap();
     assert.eq(snap0.tier, 0, '默认自动档 L0');
-    const LOW = 'window.NV_CHEAT.fps(30); window.NV_CHEAT.lowNow()';
-    const HIGH = 'window.NV_CHEAT.fps(60); window.NV_CHEAT.highNow()';
-    await waitTier(b, 1, LOW);
+    await b.page.evaluate('window.NV_CHEAT.fps(30); window.NV_CHEAT.lowNow()');
+    await b.page.waitForFunction('window.NV_SNAP().tier === 1', null, { timeout: 8000 });
     let sn = await b.snap();
     assert.eq(sn.ebCap, 400, 'L1 弹幕上限仍 400');
     assert.ok(sn.qToast && sn.qToast.indexOf('画质降档 · L1') >= 0, '降档提示 L1');
-    await waitTier(b, 2, LOW);
+    await b.page.evaluate('window.NV_CHEAT.lowNow()');
+    await b.page.waitForFunction('window.NV_SNAP().tier === 2', null, { timeout: 8000 });
     sn = await b.snap();
     assert.eq(sn.ebCap, 300, 'L2 弹幕上限 300');
     assert.ok(sn.qToast && sn.qToast.indexOf('弹幕上限 300') >= 0, '降档提示 L2');
-    await waitTier(b, 1, HIGH);
+    await b.page.evaluate('window.NV_CHEAT.fps(60); window.NV_CHEAT.highNow()');
+    await b.page.waitForFunction('window.NV_SNAP().tier === 1', null, { timeout: 8000 });
     sn = await b.snap();
     assert.ok(sn.qToast && sn.qToast.indexOf('回升') >= 0, '方向感知：回升提示（不再叫降档）');
-    await waitTier(b, 0, HIGH);
+    await b.page.evaluate('window.NV_CHEAT.highNow()');
+    await b.page.waitForFunction('window.NV_SNAP().tier === 0', null, { timeout: 8000 });
     sn = await b.snap();
     assert.eq(sn.ebCap, 400, 'L0 弹幕上限回 400');
     assert.deep(b.errors, [], '无未捕获异常');
@@ -399,7 +391,7 @@ function assertRowsSeparated(runs, tag) {
     await b.waitStage('duel');
     await b.page.mouse.click(503, 109); // 📅 今日日期（dseed:t）
     await b.page.mouse.click(284, 139); // 5 波（dcap:5 首档）
-    await b.page.mouse.click(95, 185);  // 卡 0 火力强化（dcard:0 → Lv1）
+    await b.page.mouse.click(95, 211);  // 卡 0 火力强化（dcard:0 → Lv1；[FIX-DUEL1] 网格顶 +26 → y 197..224）
     await b.page.waitForTimeout(150);
     // ② 码：⧉ 复制对决链接（dshare）→ 剪贴板
     await b.page.mouse.click(422, 333);
@@ -530,7 +522,189 @@ function assertRowsSeparated(runs, tag) {
     await b.ctx.close();
   });
 
+  /* ================= [FIX-CFG2]/[FIX-GEOM1] 设置页实机（渲染标签 = 实际行为） ================= */
+  s.test('设置页实机：scan/shake 开关语义往返 + 高亮像素落在「开」+ 行盒不交叠', async () => {
+    const b = await boot(browser, base);
+    await b.page.mouse.click(773, 89); // ⚙ 设置 chip（W-130..W-12, y 76..102）
+    await b.waitStage('set');
+    await b.page.mouse.move(10, 10);
+    await b.page.waitForTimeout(250);
+    const sg = (await b.snap()).sgeom;
+    assert.ok(sg && sg.compact, '844×390 命中 compact 几何');
+    assert.ok(sg.pitch >= sg.h, '行盒不交叠（pitch ' + sg.pitch + ' ≥ 行高 ' + sg.h + '，[FIX-GEOM1] 旧版 18<20）');
+    // CFGS 行序（unit 侧已钉住数组本体）：0 mute / 5 shake / 6 scan；选项按钮 x 固定 W/2+10+oi*68, w62
+    const btnStat = (x0, x1, yT, h) => b.page.evaluate(([a, c, d, w]) => {
+      const img = document.getElementById('nv-canvas').getContext('2d').getImageData(a, c, w, d).data;
+      let maxRB = -999;
+      for (let j = 0; j < img.length; j += 4) maxRB = Math.max(maxRB, img[j] - img[j + 2]);
+      return maxRB; // 高亮 #ffc233 → R-B=204；未选 #5a7090 → R-B≈-54
+    }, [x0, yT, h, x1 - x0]);
+    const rowY = i => [Math.round(sg.y0 + i * sg.pitch), sg.h];
+    const oi0 = 432, oi1 = 500, w = 62;
+    const readRow = async i => {
+      const [yT, h] = rowY(i);
+      return { a: await btnStat(oi0, oi0 + w, yT, h), b: await btnStat(oi1, oi1 + w, yT, h) };
+    };
+    const cls = rb => rb > 100 ? 'Y' : 'g';
+    // 缺键回填：shake/scan=1 → 高亮必须落在 oi1（「开」）；mute=0 → 高亮在 oi0（「开」=不静音，键语义反相恰好正确）
+    let st = await readRow(5);
+    assert.eq(cls(st.a) + cls(st.b), 'gY', 'shake 默认值 1 → 「开」高亮（渲染标签=布尔闸门）');
+    st = await readRow(6);
+    assert.eq(cls(st.a) + cls(st.b), 'gY', 'scan 默认值 1 → 「开」高亮');
+    st = await readRow(0);
+    assert.eq(cls(st.a) + cls(st.b), 'Yg', 'mute 默认值 0 → 「开」高亮（声音开，反相语义保持不动）');
+    // 点击往返：点「开」→ CFG 落 1 且扫描线 DOM 生效；点「关」→ 0 且隐藏
+    const scanY = rowY(6)[0] + Math.floor(sg.h / 2);
+    const cfgRead = () => b.page.evaluate('JSON.parse(localStorage.getItem("neonvoid_cfg")||"{}")');
+    const scanDisp = () => b.page.evaluate('getComputedStyle(document.querySelector(".nv-scan")).display');
+    await b.page.mouse.click(oi1 + w / 2, scanY); await b.page.mouse.move(10, 10); await b.page.waitForTimeout(150);
+    assert.eq((await cfgRead()).scan, 1, '点「开」→ CFG.scan=1');
+    assert.ok(await scanDisp() !== 'none', 'CFG.scan=1 → 扫描线显示（真值闸门生效）');
+    st = await readRow(6);
+    assert.eq(cls(st.a) + cls(st.b), 'gY', 'scan=1 渲染高亮在「开」');
+    await b.page.mouse.click(oi0 + w / 2, scanY); await b.page.mouse.move(10, 10); await b.page.waitForTimeout(150);
+    assert.eq((await cfgRead()).scan, 0, '点「关」→ CFG.scan=0');
+    assert.eq(await scanDisp(), 'none', 'CFG.scan=0 → 扫描线隐藏');
+    // shake 行同样往返（值落盘即契约；渲染侧乘数消费点由 unit 静态断言钉住）
+    const shakeY = rowY(5)[0] + Math.floor(sg.h / 2);
+    await b.page.mouse.click(oi0 + w / 2, shakeY); await b.page.mouse.move(10, 10); await b.page.waitForTimeout(150);
+    assert.eq((await cfgRead()).shake, 0, 'shake 点「关」→ 0');
+    await b.page.mouse.click(oi1 + w / 2, shakeY); await b.page.mouse.move(10, 10); await b.page.waitForTimeout(150);
+    assert.eq((await cfgRead()).shake, 1, 'shake 点「开」→ 1');
+    assert.deep(b.errors, [], '无未捕获异常');
+    await b.shot('set-rows-844x390');
+    await b.ctx.close();
+  });
+
+  /* ================= [FIX-DUEL1] 对决构建页实机（波次上限标签呼吸间距 ≥10px） ================= */
+  s.test('对决构建页实机：档位按钮带 →「波次上限」标签 → 初始构筑标题，亮像素剖面三段分离', async () => {
+    const b = await boot(browser, base);
+    await b.page.mouse.click(647, 64); // ⚔ 种子对决 chip
+    await b.waitStage('duel');
+    await b.page.waitForTimeout(250);
+    // x 340..505 覆盖 10 波/15 波按钮与居中标签；y 124..235 覆盖按钮带/标签/构筑标题/卡首行
+    const rows = await b.page.evaluate(() => {
+      const img = document.getElementById('nv-canvas').getContext('2d').getImageData(340, 124, 165, 111).data;
+      const out = [];
+      for (let y = 0; y < 111; y++) {
+        let m = 0;
+        for (let x = 0; x < 165; x++) {
+          const i = (y * 165 + x) * 4;
+          m = Math.max(m, img[i] + img[i + 1] + img[i + 2]);
+        }
+        out.push({ y: 124 + y, on: m > 260 });
+      }
+      return out;
+    });
+    const runs = [];
+    for (const r of rows) {
+      if (r.on && (!runs.length || runs[runs.length - 1].end < r.y - 1)) runs.push({ start: r.y, end: r.y });
+      else if (r.on) runs[runs.length - 1].end = r.y;
+    }
+    const s = JSON.stringify(runs);
+    assert.ok(runs.length >= 3, '至少三段亮带（档位按钮/波次上限标签/构筑标题）实测 ' + s);
+    assert.ok(runs[0].end <= 152, '首段=档位按钮带（底 ≤ H*0.055+130=151.5）实测 ' + s);
+    const gap1 = runs[1].start - runs[0].end - 1;
+    assert.ok(gap1 >= 10, '档位按钮→「波次上限」标签暗隙 ≥10px（[FIX-DUEL1]，旧版 ~2px）实测 ' + gap1 + 'px ' + s);
+    const gap2 = runs[2].start - runs[1].end - 1;
+    assert.ok(gap2 >= 4, '标签→「初始构筑」标题暗隙 ≥4px（旧版两行整段叠印）实测 ' + gap2 + 'px ' + s);
+    assert.deep(b.errors, [], '无未捕获异常');
+    await b.shot('duel-band-844x390');
+    await b.ctx.close();
+  });
+
+  /* ================= 性能基线（采样写入测试输出：控制台表 + perf-baseline.json） ================= */
+  const PERF = { env: { node: process.version, viewport: '844x390', dpr: 1, date: new Date().toISOString() }, boot: [], heap: null, swOfflineMs: null };
+  s.test('性能基线：10 形态逐一 boot ≤2s（导航起 → 形态就绪，逐形态采样）', async () => {
+    // 7 模式（键盘 → 对局就绪）+ 残影/构建器/种子对决三个入口页 + 对决结果页——与 boot 回归同一形态集
+    const FORMS = [
+      ['classic', 'mode', '1', null], ['endless', 'mode', '2', null], ['boss', 'mode', '3', null],
+      ['chaos', 'mode', '4', null], ['daily', 'mode', '5', null], ['versus', 'mode', '6', null], ['graze', 'mode', '7', null],
+      ['ghost', 'stage:ghost', null, { hash: '#bounty=' + codec.bountyPack({ lv: new Array(NC).fill(0), wave: 3, score: 100, grazes: 0, chain: 0 }) }],
+      ['brb', 'stage:brb', 'b', { ls: { neonvoid_rush: JSON.stringify({ order: [0], tier: 0 }) } }],
+      ['duel', 'stage:duel', null, { chip: true }],
+      ['duelres', 'stage:duelres', null, { hash: '#duelres=' + codec.duelScorePack({ seed: 1, cap: 10, lv: new Array(NC).fill(0), score: 100, wave: 1, won: false, rank: 'D' }) }]
+    ];
+    for (const [name, kind, key, opts] of FORMS) {
+      const t0 = Date.now();
+      const ctx = await browser.newContext({ viewport: VIEW, deviceScaleFactor: 1, hasTouch: true });
+      if (opts && opts.ls) for (const [k, v] of Object.entries(opts.ls)) {
+        await ctx.addInitScript(([k2, v2]) => { try { localStorage.setItem(k2, v2); } catch (e) {} }, [k, v]);
+      }
+      const page = await ctx.newPage();
+      await page.goto(base + '/index.html' + (opts && opts.hash || ''), { waitUntil: 'load' });
+      await page.waitForFunction('typeof window.NV_SNAP === "function"', null, { timeout: 20000 });
+      const msSnap = Date.now() - t0;
+      if (kind === 'mode') { // 模式形态：数字 → 单人 → 对局就绪
+        await page.keyboard.press(key);
+        await page.waitForFunction('window.NV_SNAP().tStage === "players"', null, { timeout: 8000 });
+        await page.keyboard.press('1');
+        await page.waitForFunction('window.NV_SNAP().state === "playing"', null, { timeout: 8000 });
+      } else if (kind === 'stage:brb') {
+        await page.keyboard.press(key);
+        await page.waitForFunction('window.NV_SNAP().tStage === "brb"', null, { timeout: 8000 });
+      } else if (kind === 'stage:duel') {
+        await page.mouse.click(647, 64);
+        await page.waitForFunction('window.NV_SNAP().tStage === "duel"', null, { timeout: 8000 });
+      } else { // stage:ghost / stage:duelres —— hash 直达，就绪即形态
+        await page.waitForFunction('window.NV_SNAP().tStage === "' + kind.slice(6) + '"', null, { timeout: 8000 });
+      }
+      const ms = Date.now() - t0;
+      PERF.boot.push({ form: name, ready: kind === 'mode' ? 'playing' : kind.slice(6), snapMs: msSnap, bootMs: ms });
+      console.log('  · boot ' + name.padEnd(8) + ' ' + msSnap + 'ms(snap) / ' + ms + 'ms(ready)');
+      assert.ok(ms <= 2000, name + ' boot ' + ms + 'ms ≤ 2000ms');
+      await ctx.close();
+    }
+  });
+  s.test('性能基线：对局 30s JS heap 增长 ≤5MB（classic 实机 + CDP 强制 GC 双端采样）', async () => {
+    const b = await boot(browser, base);
+    await startModeByKey(b.page, '1');
+    const client = await b.ctx.newCDPSession(b.page);
+    await client.send('HeapProfiler.enable');
+    const gcRead = async () => {
+      await client.send('HeapProfiler.collectGarbage');
+      await client.send('HeapProfiler.collectGarbage');
+      await b.page.waitForTimeout(120);
+      return b.page.evaluate('performance.memory.usedJSHeapSize');
+    };
+    const h0 = await gcRead();
+    const samples = [{ t: 0, mb: +(h0 / 1048576).toFixed(2) }];
+    for (let i = 1; i <= 6; i++) { // 30s 自然对局（出兵/受击/死亡→结算均为正常流），每 5s 采样
+      await b.page.waitForTimeout(5000);
+      samples.push({ t: i * 5, mb: +((await b.page.evaluate('performance.memory.usedJSHeapSize')) / 1048576).toFixed(2) });
+    }
+    const h1 = await gcRead();
+    const growthMB = +((h1 - h0) / 1048576).toFixed(2);
+    PERF.heap = { startMB: samples[0].mb, endGCMB: +(h1 / 1048576).toFixed(2), growthMB, samples };
+    console.log('  · heap 30s：' + samples[0].mb + 'MB → ' + (h1 / 1048576).toFixed(2) + 'MB（GC 后），增长 ' + growthMB + 'MB');
+    assert.ok(growthMB <= 5, '30s heap 增长 ' + growthMB + 'MB ≤ 5MB');
+    await b.ctx.close();
+  });
+  s.test('性能基线：SW 离线启动 ≤3s（先在线装 SW → 断网重载 → NV_SNAP 就绪）', async () => {
+    const ctx = await browser.newContext({ viewport: VIEW, deviceScaleFactor: 1, hasTouch: true });
+    const page = await ctx.newPage();
+    await page.goto(base + '/index.html', { waitUntil: 'load' });
+    await page.waitForFunction('typeof window.NV_SNAP === "function"', null, { timeout: 20000 });
+    await page.waitForFunction('navigator.serviceWorker.controller !== null', null, { timeout: 15000 }); // install+claim 完成
+    await ctx.setOffline(true);
+    const t1 = Date.now();
+    await page.goto(base + '/index.html', { waitUntil: 'load' });
+    await page.waitForFunction('typeof window.NV_SNAP === "function"', null, { timeout: 10000 });
+    const ms = Date.now() - t1;
+    const sn = await page.evaluate('window.NV_SNAP()');
+    PERF.swOfflineMs = ms;
+    console.log('  · SW 离线启动 ' + ms + 'ms（state=' + sn.state + '）');
+    assert.ok(ms <= 3000, '离线启动 ' + ms + 'ms ≤ 3000ms');
+    assert.ok(sn && sn.state, '离线启动后页面可交互（NV_SNAP 可读）');
+    await ctx.close();
+  });
+
   const r = await s.run();
+  // 性能基线落盘：测试工件目录（NV_E2E_SHOTS）+ 控制台汇总，供后续轮次对比回归
+  try {
+    fs.writeFileSync(path.join(SHOTS, 'perf-baseline.json'), JSON.stringify(PERF, null, 1));
+    console.log('性能基线 → ' + path.join(SHOTS, 'perf-baseline.json'));
+  } catch (e) { console.log('性能基线落盘失败（不影响判定）: ' + e.message); }
   await browser.close();
   srv.close();
   console.log('截图/工件目录: ' + SHOTS);
