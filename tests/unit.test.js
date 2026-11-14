@@ -675,6 +675,14 @@ s.test('存档迁移矩阵 ⑧ duels 旧行缺字段：me/opp/res/deck/t 补全 
   suite2.test('复制对决链接 toast 文案含完整口径', () => {
     assert.ok(src.indexOf('对决链接已复制 · 发给对手，同码同卷同词条同随机流（升级三选一同池，序列随对局节奏）') >= 0);
   });
+  suite2.test('[R14-PROMO] 分享链接宣传语三处统一完整口径（#bounty=/#rush= 补全，样板=#duel=）', () => {
+    assert.ok(src.indexOf('残影悬赏链接已复制 · 发给朋友，构筑/波次/成绩/击杀链全部入码 · 打开即迎战你的死亡残影') >= 0,
+      '#bounty= 分享 toast 已补全（短版旧文案「发给朋友来讨伐你的残影」已移除）');
+    assert.ok(src.indexOf('发给朋友来讨伐你的残影') < 0, '旧短版已移除');
+    assert.ok(src.indexOf('分享链接已复制 · 发给朋友，出场序列与血量档全部入码 · 打开直接迎战你的自定义连战') >= 0,
+      '#rush= 分享 toast 已补全（短版旧文案「发给朋友迎战你的菜单」已移除）');
+    assert.ok(src.indexOf('发给朋友迎战你的菜单') < 0, '旧短版已移除');
+  });
   suite2.test('结算底部三行统一让位（[FIX-COS13]+[FIX-COS13b]）：stackFits 预算 + ctaY 受 btnY-31 钳制 + 提示行随 ctaY', () => {
     assert.ok(src.indexOf('const stackFits = !compact || hintY <= btnY - 55;') >= 0, 'stackFits 预算在位（COS13b：hintY ≤ btnY-55 保证 ctaY=hintY+24 不被带顶钳制拉回）');
     assert.ok(src.indexOf('const stackFits = !compact || hintY <= btnY - 46;') < 0, '旧预算 btnY-46 已被 COS13b 收紧');
@@ -710,8 +718,29 @@ s.test('存档迁移矩阵 ⑧ duels 旧行缺字段：me/opp/res/deck/t 补全 
     const idx = getSource();
     const vs = idx.match(/NEON VOID v(\d+\.\d+\.\d+)/);
     assert.ok(vs, 'index.html 页脚版本串在位');
-    assert.eq(vs[1], '1.5.3', 'index.html 版本 = 1.5.3（本轮发版）');
-    assert.eq(+m[1], 13, 'sw.js CACHE = v13（上一版 v12 + 1）');
+    assert.eq(vs[1], '1.5.4', 'index.html 版本 = 1.5.4（本轮发版）');
+    assert.eq(+m[1], 14, 'sw.js CACHE = v14（上一版 v13 + 1）');
+  });
+  suite2.test('[R14-HOV] hover 白圈判定带 mouse.inside 门 + 触屏事件同步清 hover 态', () => {
+    // 四处 hov 判定（title 按钮/升级卡/波次闸/结算钮）全部带 inside 门——stuck hover 清零
+    assert.eq((src.match(/const hov = mouse\.inside && mouse\.x >= /g) || []).length, 4, '4 处 hov 判定都有 mouse.inside 门');
+    assert.ok(src.indexOf("cv.addEventListener('pointermove', (e) => {") >= 0);
+    assert.ok((src.match(/mouse\.inside = false; \/\/ \[FIX-HOV1\]/g) || []).length >= 1, '触屏 pointerdown 清 hover 态在位');
+    assert.ok(src.indexOf('if (G.touchMode) G.touchMode = false; // [R14-HOV] 同上：真鼠标点按还原鼠标形态') >= 0 ||
+      (src.match(/if \(G\.touchMode\) G\.touchMode = false;/g) || []).length === 2, '混合设备真鼠标还原 touchMode（move+down 两处）');
+  });
+  suite2.test('[R14-OVER] 结算屏「⌂ 主界面」钮在位（触屏可达 goTitle，同键盘 T/波次闸 ⌂）', () => {
+    assert.ok(src.indexOf("items.push({ k: 'title', l: '⌂ 主界面 · T', c: '#7d95b8' });") >= 0, '结算主界面钮在位');
+    assert.ok(src.indexOf("else if (k === 'title') { goTitle(); return; }") >= 0, 'overAct(title) → goTitle 在位');
+    assert.ok(src.indexOf("txt(ob.l, ob.x + ob.w / 2, ob.y + ob.h / 2, ob.w < 96 ? 9 : 12") >= 0, '窄 chip 缩字号防溢出');
+  });
+  suite2.test('[R14-LOGO1] 小窗（H<560）× 页眉 ≤0.425H 的标题页（players/ach/set/ghost）跳过大 logo', () => {
+    assert.ok(src.indexOf("!((G.tStage === 'set' || G.tStage === 'ach' || G.tStage === 'players' || G.tStage === 'ghost') && H < 560)") >= 0,
+      'logo 让位条件在位（桌面常规窗口 H≥560 逐像素不变）');
+  });
+  suite2.test('[R14-COPY] 设置页副标题去同义反复 + 分享链接宣传语三处完整口径', () => {
+    assert.ok(src.indexOf("txt('点击选项立即生效 · 自动保存到本机'") >= 0, '设置页副标题精简在位');
+    assert.ok(src.indexOf('点击选项立即生效并保存') < 0, '旧同义反复句已移除');
   });
   const r2 = await suite2.run();
   const fails = r.fails.length + r2.fails.length;
