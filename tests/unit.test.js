@@ -6,9 +6,13 @@
    - dstat 连续挑战天数边界（recordScore 真实源码切片 + 可注入日期）
    - 画质档位状态机（setTier + 主循环治理器真实源码切片）
    - overTitle() 六形态
+   - 设置页开关语义（CFGS/CFG_RNG 真实源码提取）+ setGeom 全视口扫描 H=300..900
+   - [R13-MIGRATE] 存档迁移矩阵：四码 v1/v2 历史版布局 + 旧荣誉榜/dstat/shadow/duels 形态，兼容 + 自愈
    运行：node tests/unit.test.js */
 'use strict';
-const { createSuite, assert, buildSandbox, buildDstatStreak, buildGovernor, fakeDateCtor, getSource } = require('./_lib');
+const fs = require('fs');
+const path = require('path');
+const { ROOT, createSuite, assert, buildSandbox, buildDstatStreak, buildGovernor, fakeDateCtor, getSource, extractDecl, extractFn } = require('./_lib');
 
 const s = createSuite('unit');
 const sb = buildSandbox();
@@ -459,6 +463,207 @@ s.test('overTitle 六形态逐一核对', () => {
   assert.deep(a.overTitle(), expect.classic, '未知形态回落 default（虚空肃清）');
 });
 
+/* ================= [FIX-CFG2] 设置页开关语义（真实源码提取 CFGS/CFG/CFG_RNG） ================= */
+s.test('CFGS 开关语义：二值行 o[1] 必须=「开」；shake/scan=[关,开]，mute 反相 [开,关] 恰好正确', () => {
+  const src = getSource();
+  const CFGS = new Function(extractDecl(src, 'CFGS') + '; return CFGS;')();
+  const CFG_RNG = new Function(extractDecl(src, 'CFG_RNG') + '; return CFG_RNG;')();
+  const row = k => { const r = CFGS.find(x => x.k === k); assert.ok(r, 'CFGS 行存在: ' + k); return r; };
+  // 逐行不变式：CFG_RNG 上限=1 的二值行（mute 除外——其键语义反相，0=不静音）序号 1 必须=「开」：
+  // 缺键回填 1（布尔真值闸门=开）时渲染高亮必须落在「开」上
+  // （[FIX-CFG1] wgate/shadow 同款陷阱，[FIX-CFG2] shake/scan 一并修正）
+  for (const r of CFGS) {
+    if (CFG_RNG[r.k] !== 1 || r.k === 'mute') continue;
+    assert.eq(r.o.length, 2, r.k + ' 二值行选项数=2');
+    assert.eq(r.o[1], '开', r.k + ' o[1] 必须=「开」（回填值 1 的渲染标签）');
+    assert.eq(r.o[0], '关', r.k + ' o[0]=「关」');
+  }
+  // 点名修复的行 + 明确不动的 mute 行 + [A11Y-CB] 色盲行同律
+  assert.deep(row('shake').o, ['关', '开'], '屏幕震动行');
+  assert.deep(row('scan').o, ['关', '开'], 'CRT 扫描线行');
+  assert.deep(row('shadow').o, ['关', '开'], '昨日之影行（[FIX-CFG1] 回归）');
+  assert.deep(row('wgate').o, ['关', '开'], '波间暂停行（[FIX-CFG1] 回归）');
+  assert.deep(row('cb').o, ['关', '开'], '色盲模式行（[A11Y-CB] 默认关）');
+  assert.deep(row('mute').o, ['开', '关'], '声音总开关行键语义反相（0=不静音）恰好正确——不许动');
+  // 布尔真值闸门消费点仍在位：scan → 扫描线显隐；shake → 震幅乘数
+  assert.ok(src.indexOf("sc.style.display = CFG.scan ? '' : 'none'") >= 0, 'applyCfg 的 CFG.scan 真值闸门在位');
+  assert.ok(src.indexOf('CFG.shake') >= 0, 'CFG.shake 真值乘数消费点在位');
+});
+
+/* ================= [FIX-GEOM1]+[R13-GEOM1] setGeom 全视口扫描（真实源码提取，SAFE 归零） =================
+   9 行设置项（含色盲模式）在 H=300..900 全程：行盒不交叠、不压副标题/返回按钮/榜块标题。
+   crowd 档（H<430）标题块上移 0.30H + 行盒收薄 14px（R12 遗留：844×390 末行压返回钮 7.8px、
+   844×320 末 3 行压钮 12~48px 且被屏幕下缘截断 10px —— 本扫描覆盖该回归带）。 */
+s.test('setGeom 全视口扫描 H=300..900：行盒不交叠、不压副标题/返回按钮/榜块标题', () => {
+  const src = getSource();
+  const CL = new Function(extractDecl(src, 'CL') + '; return CL;')();
+  const CFGS = new Function(extractDecl(src, 'CFGS') + '; return CFGS;')();
+  const SAFE0 = { l: 0, r: 0, t: 0, b: 0 };
+  const n = CFGS.length;
+  assert.eq(n, 9, 'CFGS 9 行（含色盲模式）——几何扫描前提');
+  for (let H = 300; H <= 900; H++) {
+    const setGeom = new Function('H', 'CFGS', 'SAFE', 'CL', extractFn(src, 'setGeom') + '; return setGeom;')(H, CFGS, SAFE0, CL);
+    const sg = setGeom();
+    const bottom = sg.y0 + (n - 1) * sg.pitch + sg.h;
+    const tag = 'H=' + H;
+    assert.ok(sg.pitch >= sg.h - 0.001, tag + ' 行距≥行高（行盒不交叠，旧版 compact 18<20）pitch=' + sg.pitch.toFixed(2) + ' h=' + sg.h);
+    // 副标题字身下缘 ≈ hdrY+29：首行保险丝 y0≥hdrY+30（盒级净距）；crowd 档 hdrY=0.30H；
+    // 桌面分支 y0=H*0.47，且 H∈[703,739] 榜块让位会把首行上移到 y0min=H*0.47-10（既有行为，字身擦边 ≤1.7px）→ 阈值取 +20
+    const yFloor = H < 430 ? Math.max(56, H * 0.30) + 30 : H < 560 ? H * 0.425 + 30 : H * 0.425 + 20;
+    assert.ok(sg.y0 >= yFloor - 0.01, tag + ' 首行文本不压副标题（y0≥' + yFloor.toFixed(1) + '）y0=' + sg.y0.toFixed(2));
+    if (H >= 370) {
+      assert.ok(bottom <= H - 38, tag + ' 行块底边≤返回按钮上沿（H-38）bottom=' + bottom.toFixed(2));
+      if (H > 430 && sg.honFit) assert.ok(bottom <= H * 0.80 - 19 + 0.01, tag + ' 行块底边≤榜块标题字身上缘（honTop-7）bottom=' + bottom.toFixed(2));
+    }
+  }
+});
+
+/* ================= [R13-MIGRATE] 存档迁移矩阵 =================
+   四码 v1/v2 历史版本布局 + 旧荣誉榜/dstat/shadow/duels 历史形态，逐一断言「兼容加载 + 坏形状自愈」。
+   e2e 侧另有「存档迁移实机」一包旧档走真实页面 boot→对局→落盘全链路。 */
+function mkBountyLegacy(ver, nCards, wave, score, grazes, chain) {
+  // v1: 1+9+2+3+2+1+1=19 字节；v2: 22 字节（12 卡）。布局同 index.html bountyUnpack 的 BOUNTY_LEGACY 表。
+  const b = new Array(1 + nCards + 9).fill(0);
+  b[0] = ver;
+  b[1] = 3; b[2] = 4; // 前两卡等级 3/4，其余缺省视为 0
+  b[1 + nCards] = (wave >> 8) & 255; b[2 + nCards] = wave & 255;
+  b[3 + nCards] = (score >> 16) & 255; b[4 + nCards] = (score >> 8) & 255; b[5 + nCards] = score & 255;
+  b[6 + nCards] = (grazes >> 8) & 255; b[7 + nCards] = grazes & 255;
+  b[8 + nCards] = chain;
+  let x = 0; for (let i = 0; i < b.length - 1; i++) x ^= b[i];
+  b[b.length - 1] = x;
+  return a.b64uEnc(b);
+}
+s.test('存档迁移矩阵 ① 悬赏码 v1（19 字节 9 卡布局）：hash 页面路径兼容 + ghostStats 下游可消费', () => {
+  const code = mkBountyLegacy(1, 9, 9, 0x001234, 3, 1);
+  const sb2 = buildSandbox({ location: { hash: '#bounty=' + code } });
+  const d = sb2.api.parseHashBounty();
+  assert.ok(d, 'v1 悬赏码经 #bounty= 前缀解析成功');
+  assert.eq(d.wave, 9, 'v1 wave');
+  assert.eq(d.score, 0x1234, 'v1 score');
+  assert.eq(d.grazes, 3, 'v1 grazes');
+  assert.eq(d.chain, 1, 'v1 chain');
+  assert.eq(d.lv[0], 3, 'v1 前 9 卡位可读');
+  assert.eq(d.lv[NC - 1], 0, 'v1 缺省新卡位视为 0（构筑继承安全）');
+  const st = a.ghostStats(d);
+  assert.ok(st.hp > 0 && isFinite(st.hp), 'ghostStats(v1 数据).hp=' + st.hp + ' 有限正数（悬赏页可开局）');
+});
+s.test('存档迁移矩阵 ② 悬赏码 v2（22 字节 12 卡布局）：hash 页面路径兼容 + ghostStats 下游可消费', () => {
+  const code = mkBountyLegacy(2, 12, 15, 0xABCDEF, 40, 2);
+  const sb2 = buildSandbox({ location: { hash: '#bounty=' + code } });
+  const d = sb2.api.parseHashBounty();
+  assert.ok(d, 'v2 悬赏码解析成功');
+  assert.eq(d.wave, 15, 'v2 wave');
+  assert.eq(d.score, 0xABCDEF, 'v2 score');
+  assert.eq(d.grazes, 40, 'v2 grazes');
+  assert.eq(d.lv[11], 0, 'v2 卡位 11 未写入 → 0');
+  assert.eq(d.lv[NC - 1], 0, 'v2 缺省新卡位视为 0');
+  const st = a.ghostStats(d);
+  assert.ok(st.hp > 0 && isFinite(st.hp), 'ghostStats(v2 数据).hp=' + st.hp + ' 有限正数');
+});
+s.test('存档迁移矩阵 ③ 裸 hash 旧悬赏链接（无 #bounty= 前缀的历史分享形态）仍可加载', () => {
+  const code = mkBountyLegacy(1, 9, 4, 5000, 1, 0);
+  const sb2 = buildSandbox({ location: { hash: '#' + code } });
+  const d = sb2.api.parseHashBounty();
+  assert.ok(d, '裸 hash 旧链接解析成功');
+  assert.eq(d.wave, 4, '裸 hash v1 wave');
+});
+s.test('存档迁移矩阵 ④ rush/duel/duelres v1 布局（历史唯一版本）：可解 + 未知版本拒绝自愈', () => {
+  // rush v1：[ver=1, N, N×序号, tier, xor]
+  const rb = [1, 2, 1, 2, 1, 0]; let rx = 0; for (let i = 0; i < rb.length - 1; i++) rx ^= rb[i]; rb[rb.length - 1] = rx;
+  const r1 = a.rushUnpack(a.b64uEnc(rb));
+  assert.ok(r1, 'rush v1 码可解');
+  assert.deep(r1, { order: [1, 2], tier: 1 }, 'rush v1 字段');
+  assert.isNull(a.rushUnpack(a.b64uEnc([2, 2, 1, 2, 1, rx])), 'rush ver=2（未来版本）拒绝——不半残不炸');
+  // duel v1：21 字节布局（DUEL_VER=1）
+  const dcode = a.duelPack({ seed: 7, lv: new Array(NC).fill(0), cap: 5 });
+  const d1 = a.duelUnpack(dcode);
+  assert.ok(d1 && d1.cap === 5, 'duel v1 码可解（当前版本即历史版本，向后兼容）');
+  assert.isNull(a.duelUnpack(a.b64uEnc([2].concat(a.b64uDec(dcode).slice(1)))), 'duel ver=2 拒绝');
+  // duelres v1：26 字节布局
+  const rcode = a.duelScorePack({ seed: 9, cap: 5, lv: new Array(NC).fill(0), score: 100, wave: 2, won: false, rank: 'C' });
+  const rr1 = a.duelScoreUnpack(rcode);
+  assert.ok(rr1 && rr1.score === 100, 'duelres v1 码可解');
+  assert.isNull(a.duelScoreUnpack(a.b64uEnc([2].concat(a.b64uDec(rcode).slice(1)))), 'duelres ver=2 拒绝');
+});
+s.test('存档迁移矩阵 ⑤ 旧荣誉榜（neonvoid_lb）：v1.3 时代行缺 m/c → loadLB 补全；坏形状 → 整表重置 + removeItem 自愈', () => {
+  const src = getSource();
+  const MODE_TAG = new Function(extractDecl(src, 'MODE_TAG') + '; return MODE_TAG;')();
+  const mkLS = init => {
+    const store = Object.assign({}, init);
+    return { store, removed: [], getItem(k) { return k in store ? store[k] : null; }, setItem(k, v) { store[k] = String(v); }, removeItem(k) { store[k] = undefined; delete store[k]; this.removed.push(k); } };
+  };
+  const run = ls => {
+    const G = {};
+    new Function('G', 'localStorage', 'MODE_TAG', extractFn(src, 'loadLB') + '; return loadLB;')(G, ls, MODE_TAG)();
+    return G.lb;
+  };
+  // ① v1.3 时代行：只有 n/s/w，无 m（模式标注后期才加）；c 存真值布尔
+  const out = run(mkLS({ neonvoid_lb: JSON.stringify([{ n: 'AAA', s: 123456, w: 9, c: 1 }, { n: 'BBB', s: 2345, w: 4 }]) }));
+  assert.eq(out.length, 2, '旧行保留');
+  assert.eq(out[0].m, 'classic', '缺 m 补 classic');
+  assert.eq(out[0].c, 1, 'c 真值归一为 1');
+  assert.eq(out[1].c, 0, '缺 c 归一 0');
+  assert.eq(out[1].w, 4, 'w 保留');
+  // ② 坏形状行（null / s 非数）→ 整表降级重置 + removeItem（[FIX-DATA1] 自愈，绝不白屏）
+  const ls2 = mkLS({ neonvoid_lb: JSON.stringify([{ s: 100, w: 1 }, null, { s: 'x' }]) });
+  assert.deep(run(ls2), [], '坏形状整表重置');
+  assert.ok(ls2.removed.indexOf('neonvoid_lb') >= 0, 'removeItem 落盘自愈');
+  // ③ 非 JSON / 超 5 行截断
+  assert.deep(run(mkLS({ neonvoid_lb: 'not json' })), [], '非 JSON → 空表（catch 兜底）');
+  const six = JSON.stringify([1, 2, 3, 4, 5, 6].map(i => ({ s: i * 100, w: 1 })));
+  assert.eq(run(mkLS({ neonvoid_lb: six })).length, 5, '超 5 行截断为 5');
+});
+s.test('存档迁移矩阵 ⑥ dstat v1.4 早期形态：缺 mcombo/best.c/best.t → sanitizeDstat 补全 4 字段', () => {
+  const o = a.sanitizeDstat(JSON.stringify({ last: '2026-11-10', streak: 3, best: { s: 4200, w: 3 } }));
+  assert.eq(o.streak, 3, 'streak 保留');
+  assert.eq(o.last, '2026-11-10', 'last 保留');
+  assert.deep(o.best, { s: 4200, w: 3, c: 0, t: 0 }, 'best 补 c/t');
+  assert.eq(o.mcombo, 0, 'mcombo 补 0');
+  // 数组 / 标量 / 非法 JSON → 全默认（自愈不抛错）
+  const D0 = { last: '', streak: 0, best: { s: 0, w: 0, c: 0, t: 0 }, mcombo: 0 };
+  assert.deep(a.sanitizeDstat('[1,2]'), D0, '数组形态 → 全默认');
+  assert.deep(a.sanitizeDstat('42'), D0, '标量形态 → 全默认');
+  assert.deep(a.sanitizeDstat('garbage'), D0, '非法 JSON → 全默认');
+});
+s.test('存档迁移矩阵 ⑦ shadow 历史形态：缺 v 字段/条目缺 sc·w/NaN 样本/超窗口 → sanitizeShadow 自愈', () => {
+  const ok = '2026-11-12';
+  // ① v1.5 早期条目（缺 sc/w，只有采样串）→ 补 0，采样保留
+  const o1 = a.sanitizeShadow(JSON.stringify({ days: { [ok]: { s: [100, 80, 0, 200, 120, 1] } } }));
+  assert.deep(o1.days[ok], { sc: 0, w: 0, s: [100, 80, 0, 200, 120, 1] }, '缺 sc/w 补 0，采样保留');
+  assert.eq(o1.v, 1, '缺 v 字段 → v=1');
+  // ② 顶层数组 / 字符串等坏形状 → 空壳 {v:1,days:{}}
+  assert.deep(a.sanitizeShadow(JSON.stringify([{ sc: 1 }])), { v: 1, days: {} }, '顶层数组 → 空壳');
+  assert.deep(a.sanitizeShadow('"junk"'), { v: 1, days: {} }, '字符串 → 空壳');
+  // ③ 样本串混入脏值：NaN 字面量（JSON.parse 直接抛错）→ 空壳自愈；null 样本位（+null=0）→ 采样归 0 保留
+  const o3a = a.sanitizeShadow('{"days":{"' + ok + '":{"sc":5,"w":1,"s":[100,80,NaN]}}}');
+  assert.deep(o3a, { v: 1, days: {} }, 'NaN 字面量（非法 JSON）→ 空壳自愈');
+  const o3 = a.sanitizeShadow(JSON.stringify({ days: { [ok]: { sc: 5, w: 1, s: [100, 80, null, 300, 160, 1] } } }));
+  assert.deep(o3.days[ok].s, [100, 80, 0, 300, 160, 1], 'null 样本位归 0 保留');
+  // ④ 超 7 天窗口裁剪（环形覆盖保留最近）
+  const many = {}; for (let i = 1; i <= 9; i++) many['2026-11-0' + i] = { sc: i, w: 1, s: [1, 2, 3] };
+  const o4 = a.sanitizeShadow(JSON.stringify({ days: many }));
+  assert.eq(Object.keys(o4.days).length, 7, '9 天裁到 7 天');
+  assert.ok(o4.days['2026-11-09'] && !o4.days['2026-11-01'], '保留最近 7 天');
+});
+s.test('存档迁移矩阵 ⑧ duels 旧行缺字段：me/opp/res/deck/t 补全 + cap 收口 + 12 条封顶', () => {
+  const rows = [];
+  for (let i = 0; i < 14; i++) rows.push({ seed: 0x1000 + i, cap: 999, me: { s: 100 + i } });
+  const out = a.sanitizeDuels(JSON.stringify(rows));
+  assert.eq(out.length, 12, '14 条封顶 12');
+  assert.eq(out[0].cap, 99, 'cap 999 收口 99');
+  assert.isNull(out[0].opp, '缺 opp → null（待对手）');
+  assert.eq(out[0].res, '', '缺 res → 待判定');
+  assert.deep(out[0].deck, [], '缺 deck → []');
+  assert.eq(out[0].t, 0, '缺 t → 0');
+  assert.eq(out[0].me.s, 100, 'me.s 保留');
+  assert.eq(out[0].me.r, 'D', 'me.r 缺失补 D');
+  const out2 = a.sanitizeDuels(JSON.stringify([{ seed: 'x' }, { seed: 7 }]));
+  assert.eq(out2.length, 1, 'seed 非数行整行丢弃（自愈）');
+  assert.eq(out2[0].seed, 7, '合法行保留');
+  assert.deep(a.sanitizeDuels('garbage'), [], '非 JSON → 空史');
+});
+
 (async () => {
   const r = await s.run();
   // 源码自检：确认宣传语补全与提示行让位已在 index.html 中（本轮清账项的静态断言）
@@ -479,6 +684,34 @@ s.test('overTitle 六形态逐一核对', () => {
   });
   suite2.test('NV_CHEAT.hp1 钩子存在（残影/BOSS 血量置 1 走真实死亡路径）', () => {
     assert.ok(src.indexOf('hp1: () => { if (G.boss) G.boss.hp = 1; }') >= 0);
+  });
+  suite2.test('[FIX-DUEL1] 对决构建页「波次上限」标签与档位按钮行呼吸间距 ≥10px，网格双侧几何一致', () => {
+    // 档位按钮：y = H*0.055+106, h=24 → 底 +130；标签 10.5px 字身上缘 ≈ 中点-6.5（textBaseline middle 实测）
+    const btnBottom = 106 + 24, labelY = 147, glyphHalf = 6.5;
+    assert.ok(labelY - glyphHalf - btnBottom >= 10, '标签字身上缘距按钮下缘 ≥10px：' + (labelY - glyphHalf - btnBottom).toFixed(1));
+    assert.ok(src.indexOf("txt('波次上限（打满即对决完成）', cx, H * 0.055 + 147") >= 0, '标签 y=+147 在位（旧版 +138 已移除）');
+    assert.ok(src.indexOf('H * 0.055 + 138') < 0, '旧版标签位置已移除');
+    assert.eq(src.split('H * 0.055 + (inv ? 86 : 176)').length - 1, 2, 'gy0=176 公式渲染侧/titleBtns 双侧各一份');
+    assert.ok(src.indexOf('inv ? 86 : 150') < 0, '旧版网格顶 150 已移除');
+    assert.ok(src.indexOf('const dnFit = Math.max(0, Math.floor((Math.min(H - 56 - SAFE.b, H * 0.80) - 8 - (hy + 15)) / 13) + 1);') >= 0, '对决史条数按动作按钮带钳制在位');
+  });
+  suite2.test('[FIX-GEOM1]+[R13-GEOM1] setGeom compact 行高 18 / crowd 档 14 与行距下限持平 + 榜块让位判定提前 8px', () => {
+    assert.ok(src.indexOf('const h = crowd ? 14 : compact ? 18 : 26, n = CFGS.length;') >= 0, 'compact 18（旧版 20 > pfloor 18 → 行盒交叠）/ crowd 14（极矮横屏 9 行压返回钮修复）');
+    assert.ok(src.indexOf('if (H > 430 && bottom0 > honTop - 8) {') >= 0, '榜块标题字身（honTop-7）让位判定提前 8px 触发');
+    assert.ok(src.indexOf('const pfloor = crowd ? 14 : compact ? 18 : 28;') >= 0, '行距下限与行高持平（行盒相接不交叠）');
+    assert.ok(src.indexOf('const crowd = compact && H < 430;') >= 0, 'crowd 极矮横屏档（844×390 / 844×320）在位');
+    assert.ok(src.indexOf('const hdrY = crowd ? Math.max(56, H * 0.30) : H * 0.425;') >= 0, 'crowd 标题块上移 0.30H 在位');
+    assert.ok(src.indexOf("txt('—— 系统设置 · SETTINGS ——', cx, sg.hdrY,") >= 0, '设置页标题跟随 hdrY（渲染/几何同源）');
+  });
+  suite2.test('[R13-SW] 发版纪律：sw.js CACHE 版本与 index.html 版本串同步递增', () => {
+    const swSrc = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8');
+    const m = swSrc.match(/const CACHE = 'neon-void-v(\d+)'/);
+    assert.ok(m, 'sw.js CACHE 版本行在位');
+    const idx = getSource();
+    const vs = idx.match(/NEON VOID v(\d+\.\d+\.\d+)/);
+    assert.ok(vs, 'index.html 页脚版本串在位');
+    assert.eq(vs[1], '1.5.3', 'index.html 版本 = 1.5.3（本轮发版）');
+    assert.eq(+m[1], 13, 'sw.js CACHE = v13（上一版 v12 + 1）');
   });
   const r2 = await suite2.run();
   const fails = r.fails.length + r2.fails.length;
