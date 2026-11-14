@@ -816,6 +816,156 @@ async function backToTitle(b, ms) {
     await bc.ctx.close();
   });
 
+  /* ================= [R14-HOV] 触屏 stuck hover 清零 + 触屏仿真完整一局 ================= */
+  s.test('触屏完整一局（844×390 仿真）：鼠标 hover 白圈→触屏清除（像素实测）· 摇杆/技能/升级选卡/波次闸/结算重启全触屏路径 · 零 pageerror', async () => {
+    const b = await boot(browser, base); // boot 即横屏 844×390 + hasTouch
+    // 画布内取色（game 坐标 == canvas 像素坐标，DPR=1）：按钮上缘描边行
+    const edgeRows = (b2, x0, x1, y0, y1) => b2.page.evaluate(([a0, a1, b0, b1]) => {
+      const cv = document.getElementById('nv-canvas');
+      const w = a1 - a0, h = b1 - b0;
+      const d = cv.getContext('2d').getImageData(a0, b0, w, h).data;
+      let maxMin = 0;
+      for (let yy = 0; yy < h; yy++) for (let xx = 0; xx < w; xx++) {
+        const i = (yy * w + xx) * 4;
+        maxMin = Math.max(maxMin, Math.min(d[i], d[i + 1], d[i + 2]));
+      }
+      return maxMin; // 描边白圈 → min(R,G,B)≈255；普通描边 tb.c → min=R 通道（<100）
+    }, [x0, x1, y0, y1]);
+
+    // ① 初态：触屏机从未有鼠标 → hover 态不成立（mouse 初值 (400,250) 不得点亮白圈）
+    let snap = await b.snap();
+    assert.ok(!snap.msIn, '初态 mouse.inside=false（实测 ' + snap.msIn + '）');
+    assert.eq(snap.tm, false, '初态非触屏模式');
+    const vb0 = await b.page.evaluate('window.NV_BTN()');
+    const cbtn = vb0.btns.find(x => x.act === 'mode:classic');
+    assert.ok(cbtn, 'mode 页经典战役按钮存在');
+    const ex0 = Math.round(cbtn.x + 10), ex1 = Math.round(cbtn.x + 34), ey = Math.floor(cbtn.y); // 上缘描边窗口
+    // ② 桌面鼠标真实悬停 → 白圈在位（[FIX-HOV1] 桌面行为逐像素不变的正面验证）
+    await b.page.mouse.move(Math.round(cbtn.x + cbtn.w / 2), Math.round(cbtn.y + cbtn.h / 2));
+    await b.page.waitForTimeout(150);
+    snap = await b.snap();
+    assert.ok(snap.msIn, '鼠标移入画布后 mouse.inside=true');
+    const whiteHover = await edgeRows(b, ex0, ex1, ey, ey + 2);
+    assert.ok(whiteHover >= 230, '悬停时按钮上缘为白圈描边（maxMin=' + whiteHover + ' ≥230）');
+    // ③ 混合设备关键场景：手指按下未抬起（pointerleave 不触发）→ 旧实现白圈滞留；
+    //    [FIX-HOV1] 触屏 pointerdown 同步清 hover 态 → 圈立即消失
+    await b.page.dispatchEvent('#nv-canvas', 'pointerdown',
+      { pointerType: 'touch', pointerId: 5, isPrimary: true, clientX: 60, clientY: 370, bubbles: true }); // mode 页左下角无按钮区 → titleAct(null) 无副作用
+    await b.page.waitForTimeout(120);
+    snap = await b.snap();
+    assert.ok(!snap.msIn, '触屏 pointerdown（未抬起，pointerleave 未触发）即清 hover 态（实测 ' + snap.msIn + '）');
+    assert.eq(snap.tm, true, '触屏已激活 touchMode');
+    const whiteDown = await edgeRows(b, ex0, ex1, ey, ey + 2);
+    assert.ok(whiteDown < 230, '手指按下期间白圈已消失（maxMin=' + whiteDown + ' <230，回落 tb.c 描边）');
+    await b.page.dispatchEvent('#nv-canvas', 'pointerup',
+      { pointerType: 'touch', pointerId: 5, isPrimary: true, clientX: 60, clientY: 370, bubbles: true });
+    await b.page.waitForTimeout(100);
+    // ③b 抬起后（pointerleave 路径）hover 态保持不成立
+    snap = await b.snap();
+    assert.ok(!snap.msIn, '触屏抬起后 hover 态仍不成立');
+    const whiteAfter = await edgeRows(b, ex0, ex1, ey, ey + 2);
+    assert.ok(whiteAfter < 230, '触屏抬起后白圈仍消失（maxMin=' + whiteAfter + ' <230）');
+
+    // ④ 先触屏进设置页开「波间暂停」→ 波次闸必现（顺带覆盖设置页触屏路径）
+    const vbS = await b.page.evaluate('window.NV_BTN()');
+    const setChip = vbS.btns.find(x => x.act === 'set');
+    assert.ok(setChip, '顶右「⚙ 设置 SETTINGS」chip 存在');
+    await b.page.touchscreen.tap(Math.round(setChip.x + setChip.w / 2), Math.round(setChip.y + setChip.h / 2));
+    await b.waitStage('set');
+    const vbW = await b.page.evaluate('window.NV_BTN()');
+    const wOn = vbW.btns.find(x => x.act === 'cfg:wgate:1'); // 波间暂停 · 开
+    assert.ok(wOn, '设置页「波间暂停 · 开」按钮存在');
+    await b.page.touchscreen.tap(Math.round(wOn.x + wOn.w / 2), Math.round(wOn.y + wOn.h / 2));
+    await b.page.waitForTimeout(150);
+    snap = await b.snap();
+    assert.ok(!snap.msIn, '设置页触屏操作后 hover 态仍不成立');
+    const backBtn = vbW.btns.find(x => x.act === 'back');
+    assert.ok(backBtn, '设置页「ESC · 返回」存在');
+    await b.page.touchscreen.tap(Math.round(backBtn.x + backBtn.w / 2), Math.round(backBtn.y + backBtn.h / 2));
+    await b.waitStage('mode');
+
+    // ⑤ 触屏选模式 → 单人出击
+    await b.page.touchscreen.tap(Math.round(cbtn.x + cbtn.w / 2), Math.round(cbtn.y + cbtn.h / 2));
+    await b.waitStage('players');
+    const vb1 = await b.page.evaluate('window.NV_BTN()');
+    const solo = vb1.btns.find(x => x.act === 'psolo');
+    assert.ok(solo, '选人页「1 · 单人出击」存在');
+    await b.page.touchscreen.tap(Math.round(solo.x + solo.w / 2), Math.round(solo.y + solo.h / 2));
+    await b.waitState('playing');
+    assert.eq((await b.snap()).tm, true, '对局中保持触屏模式（准星永不绘制）');
+
+    // ⑥ 摇杆注入 ×3（左半屏起手，三段拖移——与 monkey 同款真实 pointer 事件路径）
+    for (let j = 0; j < 3; j++) {
+      const jx = 120 + j * 60, jy = 200;
+      await b.page.dispatchEvent('#nv-canvas', 'pointerdown',
+        { pointerType: 'touch', pointerId: 7, isPrimary: true, clientX: jx, clientY: jy, bubbles: true });
+      for (let m2 = 1; m2 <= 3; m2++) {
+        await b.page.dispatchEvent('#nv-canvas', 'pointermove',
+          { pointerType: 'touch', pointerId: 7, isPrimary: true, clientX: jx + m2 * 20, clientY: jy - m2 * 12, bubbles: true });
+        await b.page.waitForTimeout(25);
+      }
+      await b.page.dispatchEvent('#nv-canvas', 'pointerup',
+        { pointerType: 'touch', pointerId: 7, isPrimary: true, clientX: jx + 60, clientY: jy - 36, bubbles: true });
+      await b.page.waitForTimeout(60);
+    }
+    snap = await b.snap();
+    assert.ok(snap.msIn === false, '对局中触屏注入后 hover 态仍不成立');
+    // 技能按钮触屏点按（touchBtns 右下角：冲刺 » / 超载 ⚡）
+    await b.page.touchscreen.tap(808, 330); // dash
+    await b.page.waitForTimeout(120);
+    await b.page.touchscreen.tap(746, 282); // overdrive
+    await b.page.waitForTimeout(120);
+    // ⑦ 升级三选一：xp 触发 → 触屏点卡片本体（≥44 不外扩）→ 回到对局
+    await b.page.evaluate('window.NV_CHEAT.xp()');
+    await b.waitState('levelup');
+    const vb2 = await b.page.evaluate('window.NV_BTN()');
+    const card = vb2.btns.find(x => x.act === 'card:1');
+    assert.ok(card, '升级卡片存在');
+    await b.page.touchscreen.tap(Math.round(card.x + card.w / 2), Math.round(card.y + card.h / 2));
+    await b.waitState('playing');
+
+    // ⑧ 波次闸（波间暂停已开）：轮询驱动——肃清 → 触屏点「▶ 继续作战」；自然升级随时插队 → 点卡片；
+    //    先阵亡则直接进结算。75s 预算（第 1~2 波自动火力即可肃清）
+    const dl0 = Date.now();
+    let sawWgate = false;
+    while (Date.now() - dl0 < 75000) {
+      const st = (await b.snap()).state;
+      if (st === 'over') break;
+      if (st === 'wgate') {
+        sawWgate = true;
+        const vbg = await b.page.evaluate('window.NV_BTN()');
+        const go = vbg.btns.find(x => x.act === 'go');
+        assert.ok(go, '波次闸「▶ 继续作战」存在');
+        await b.page.touchscreen.tap(Math.round(go.x + go.w / 2), Math.round(go.y + go.h / 2));
+        await b.page.waitForTimeout(250);
+        assert.eq((await b.snap()).state, 'playing', '触屏点按继续作战 → 回到对局');
+        continue;
+      }
+      if (st === 'levelup') {
+        const vbc = await b.page.evaluate('window.NV_BTN()');
+        const c2 = vbc.btns.find(x => x.act === 'card:1') || vbc.btns[0];
+        await b.page.touchscreen.tap(Math.round(c2.x + c2.w / 2), Math.round(c2.y + c2.h / 2));
+        await b.page.waitForTimeout(250);
+        continue;
+      }
+      await b.page.waitForTimeout(400);
+    }
+    assert.ok(sawWgate, '波次闸出现过（波间暂停开启后肃清必停闸）');
+    // ⑨ 结算屏（速死走真实 recordScore 链路）→ [R14-OVER] 触屏点「⌂ 主界面」回标题（此前触屏只能重开）
+    await forceOver(b);
+    await b.page.waitForFunction('window.NV_BTN().btns.length > 0', null, { timeout: 10000 });
+    const vbO = await b.page.evaluate('window.NV_BTN()');
+    const home = vbO.btns.find(x => x.act === 'title');
+    assert.ok(home, '结算屏「⌂ 主界面 · T」按钮存在（R14-OVER）');
+    await b.page.touchscreen.tap(Math.round(home.x + home.w / 2), Math.round(home.y + home.h / 2));
+    await b.waitStage('mode');
+    snap = await b.snap();
+    assert.ok(!snap.msIn, '回主界面后 hover 态仍不成立（无鼠标）');
+    assert.eq(b.errors.length, 0, '全程零 pageerror（' + (b.errors[0] || '无') + '）');
+    await b.shot('r14-touch-fullround-over');
+    await b.ctx.close();
+  });
+
   /* ================= [A11Y-MONKEY] 随机输入压力（[R13-MONKEY] 加长版 5 分钟 + resize/visibility） ================= */
   s.test('monkey：5 分钟随机点击/按键/摇杆注入 + 间歇 resize/visibility 切换 — 零 pageerror · 进程存活 · 可退回标题', async () => {
     const b = await boot(browser, base);

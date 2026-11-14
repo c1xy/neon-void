@@ -1498,7 +1498,9 @@ function copyBountyURL() {
   const code = activeBountyCode();
   if (!code) { toast('此局无法生成悬赏码', '#ff8866'); return; }
   copyText(bountyURL(code), ok => toast(
-    ok ? '✓ 残影悬赏链接已复制 · 发给朋友来讨伐你的残影' : '复制失败 · 悬赏码 ' + code, ok ? '#8affd4' : '#ff6688'));
+    // [R14-PROMO] 分享链接宣传语统一补全（对齐 #duel= 的完整口径样板「发给对手，同码同卷同词条同随机流（…）」）：
+    // 三条分享码 toast 只此一处早已换全，#bounty=/#rush= 仍是短版旧文案 → 按「码里装了什么 · 对方打开会怎样」补全
+    ok ? '✓ 残影悬赏链接已复制 · 发给朋友，构筑/波次/成绩/击杀链全部入码 · 打开即迎战你的死亡残影' : '复制失败 · 悬赏码 ' + code, ok ? '#8affd4' : '#ff6688'));
   uiClick();
 }
 function parseHashBounty() {
@@ -2037,6 +2039,9 @@ function overBtns() {
   items.push({ k: 'share', l: '分享海报', c: '#ff7ad9' });
   items.push({ k: 'paper', l: '存海报 · V', c: '#4de3ff' });
   items.push({ k: 'report', l: '复制战报 · C', c: '#7d95b8' });
+  // [R14-OVER] 结算屏补「⌂ 主界面」钮：键盘 T 一直可达，触屏此前只能重开不能回主界面
+  //（波次闸早有 ⌂ 返回主界面 · T，同款语义对齐）；触屏/鼠标点按 + 键盘 T 双通道同效
+  items.push({ k: 'title', l: '⌂ 主界面 · T', c: '#7d95b8' });
   const bw = Math.min(150, (W - 30) / items.length - 8), bh = 32, gap = 8;
   const total = items.length * bw + (items.length - 1) * gap;
   const x0 = W / 2 - total / 2, y = Math.min(H - 42 - SAFE.b, H * 0.87 + 42);
@@ -2048,6 +2053,7 @@ function overAct(k) {
   else if (k === 'bounty') copyBountyURL();
   else if (k === 'paper') downloadAutopsy();
   else if (k === 'share') shareAutopsy();
+  else if (k === 'title') { goTitle(); return; } // [R14-OVER] 触屏回主界面（同键盘 T）
   else if (k === 'report') copyText(battleReport(), ok => toast(ok ? '✓ 战报已复制到剪贴板' : '复制失败，请手动截图', ok ? '#3dff9e' : '#ff6688'));
 }
 function winGame() {
@@ -4385,9 +4391,13 @@ function drawOverlay() {
     // 同时矮视口（横屏手机）按高度收紧 logo，避免副标题/下划线压住下方提示与按钮。
     // 连战构建器（brb）与种子对决（duel/duelres）有自己的整页 UI，同样跳过 logo。
     // [R13-GEOM1] 极矮横屏（crowd）的设置页同理：9 行表单标题块已上移到 0.30H，再画 logo 就是两层文字同位叠印
+    // [R14-LOGO1] 小窗（H<560）× 页眉在 ≤0.425H 的页（players/ach/set/ghost）也跳过：logo 下划线
+    // 恒落 0.398H，compact 档与页眉字身上缘（0.425H-7）只剩 4~8px，副标题/下划线与页眉 glow
+    // 实测叠字（700×500 / 720×520 桌面小窗 set/ach/players 三页全中）。mode 页页眉 0.435H 实测干净
+    // 不受影响；桌面常规窗口（H≥560）几何逐像素不变。
     if (G.tStage !== 'guide' && G.tStage !== 'credits' && G.tStage !== 'brb' &&
         G.tStage !== 'duel' && G.tStage !== 'duelres' &&
-        !(G.tStage === 'set' && H < 430)) {
+        !((G.tStage === 'set' || G.tStage === 'ach' || G.tStage === 'players' || G.tStage === 'ghost') && H < 560)) {
       // [ELEG8-IA] 模式页大 logo 右端不得越过顶右 chip 第二列（W-256-SAFE.r）左缘 -12px：
       // 844×390 上「⚔ 种子对决」chip 与 logo 字身仅剩 ~37px 余量，真机/无头字体度量稍宽即互相压字
       //（实测案：chip 左缘压住 logo 约 50px）。按 100px 基准实测 'NEON VOID' 宽度反推 ts 上限
@@ -4478,7 +4488,7 @@ function drawOverlay() {
       ctx.shadowColor = '#9fdcff'; ctx.shadowBlur = 16;
       txt('—— 系统设置 · SETTINGS ——', cx, sg.hdrY, 14, '#9fdcff', 'center', 800);
       ctx.shadowBlur = 0;
-      txt('点击选项立即生效并保存 · 点击生效自动保存', cx, sg.hdrY + 22, 11, 'rgba(170,210,240,.7)', 'center', 500);
+      txt('点击选项立即生效 · 自动保存到本机', cx, sg.hdrY + 22, 11, 'rgba(170,210,240,.7)', 'center', 500); // [R14-COPY] 原句「立即生效并保存 · 生效自动保存」同义反复
       // [FIX-COS3] 矮视口下首行下移避开提示行、行距收紧，避免 9 行设置项超出屏幕底缘或压住提示行/返回按钮
       // [FIX-COS8] 行几何统一走 setGeom()：设置页 9 行让位荣誉榜块与「ESC · 返回」按钮，各档视口都不叠字；
       // 选项按钮（titleBtns 的 cfg:*）用同一份几何，标签与按钮永不错位
@@ -4494,7 +4504,7 @@ function drawOverlay() {
       ctx.shadowBlur = 0;
       const cl = [
         ['NEON VOID · 霓虹虚空', 22, '#eaf6ff', 800],
-        ['v1.5.3 · 单文件 · 零依赖 · ~308KB', 12, 'rgba(170,200,235,.8)', 600],
+        ['v1.5.4 · 单文件 · 零依赖 · ~310KB', 12, 'rgba(170,200,235,.8)', 600],
         ['v1.0.2 修复：无尽模式高波次白屏 · 超频射控失效 · 屏幕外残敌卡波', 11, 'rgba(120,230,190,.85)', 600],
         ['v1.0.3 平衡：高波次难度曲线（数量↑ / 血量封顶）· 帧循环微调', 11, 'rgba(120,230,190,.85)', 600],
         ['v1.1.0 扩充：奇点之瞳降临 · 双螺旋/镜面折返弹幕 · 超导闪现/虚空结晶/擦弹领域', 11, 'rgba(120,230,190,.85)', 600],
@@ -4505,6 +4515,7 @@ function drawOverlay() {
         ['v1.5.1 打磨：模式分组与新手引导 · 结算屏/Toast 口径统一 · 摇杆/榜块/弹窗清账', 11, 'rgba(120,230,190,.85)', 600],
         ['v1.5.2 无障碍：色盲模式（蓝橙调色板 · 弹幕形状差异化）· 触屏 44px 命中外扩 · 随机输入压力验证', 11, 'rgba(120,230,190,.85)', 600],
         ['v1.5.3 收官：设置页极矮视口让位（9 行不压返回钮）· 旧档/四码迁移矩阵 · 5 分钟 monkey 压力', 11, 'rgba(120,230,190,.85)', 600],
+        ['v1.5.4 打磨：触屏 hover 白圈清零 · 小窗页眉/logo 让位 · 分享码口径补全 · 结算屏可回主界面', 11, 'rgba(120,230,190,.85)', 600],
         ['', 10, '', 400],
         ['设计 · 代码 · 美术 · 音乐', 14, '#dfeeff', 700],
         ['全部由 AI 通过 VIBECODING 创作', 14, '#ff7ad9', 700],
@@ -4674,7 +4685,10 @@ function drawOverlay() {
       }
     }
     for (const tb of titleBtns()) {
-      const hov = mouse.x >= tb.x && mouse.x <= tb.x + tb.w && mouse.y >= tb.y && mouse.y <= tb.y + tb.h;
+      // [FIX-HOV1] hover 仅在鼠标真实悬停画布时成立：mouse 初值 (400,250)、触屏不更新 mouse.x/y，
+      // 旧判定不看 mouse.inside → 触屏机/未动鼠标时 (400,250) 命中的按钮常驻白圈（stuck hover）。
+      // 桌面鼠标悬停时 inside 恒为 true，行为逐像素不变。
+      const hov = mouse.inside && mouse.x >= tb.x && mouse.x <= tb.x + tb.w && mouse.y >= tb.y && mouse.y <= tb.y + tb.h;
       ctx.save();
       if (hov) {
         const mx2 = tb.x + tb.w / 2, my2 = tb.y + tb.h / 2;
@@ -4787,7 +4801,7 @@ function drawOverlay() {
     // 页脚基线在 H-14 直接从按钮下穿过 → 这些自绘子页一律让位不画页脚（各自已有返回按钮/页内提示）
     if (G.tStage !== 'brb' && G.tStage !== 'ach' && G.tStage !== 'set' && G.tStage !== 'guide' &&
         G.tStage !== 'credits' && G.tStage !== 'ghost' && G.tStage !== 'duel' && G.tStage !== 'duelres') {
-      txt('P 暂停 · M 静音 · A 成就 · G 指南 · S 设置 · C 关于 · B 构建器 · NEON VOID v1.5.3', cx, H - 14, 10, 'rgba(140,170,210,.4)', 'center', 500, true);
+      txt('P 暂停 · M 静音 · A 成就 · G 指南 · S 设置 · C 关于 · B 构建器 · NEON VOID v1.5.4', cx, H - 14, 10, 'rgba(140,170,210,.4)', 'center', 500, true);
     }
   } else if (G.state === 'levelup') {
     ctx.fillStyle = 'rgba(3,5,16,.8)';
@@ -4799,7 +4813,7 @@ function drawOverlay() {
     const vert = W < 620;
     for (let i = 0; i < G.cards.length; i++) {
       const c = G.cards[i];
-      const hov = mouse.x >= c.x && mouse.x <= c.x + c.w && mouse.y >= c.y && mouse.y <= c.y + c.h;
+      const hov = mouse.inside && mouse.x >= c.x && mouse.x <= c.x + c.w && mouse.y >= c.y && mouse.y <= c.y + c.h; // [FIX-HOV1] 同上：无真实悬停不给白圈
       const ca = CL((G.cardT - i * 0.09) / 0.32, 0, 1);
       const oy = (1 - (1 - Math.pow(1 - ca, 3))) * 30;
       ctx.save();
@@ -4873,7 +4887,7 @@ function drawOverlay() {
     txt('下一波 · WAVE ' + pad(nw, 2), cx, H * 0.462 + 11, 12, 'rgba(170,200,235,.8)', 'center', 700, true);
     txt(info, cx, H * 0.462 + 25, 13, ic, 'center', 800);
     for (const wb of wBtns()) {
-      const hov = mouse.x >= wb.x && mouse.x <= wb.x + wb.w && mouse.y >= wb.y && mouse.y <= wb.y + wb.h;
+      const hov = mouse.inside && mouse.x >= wb.x && mouse.x <= wb.x + wb.w && mouse.y >= wb.y && mouse.y <= wb.y + wb.h; // [FIX-HOV1] 同上
       ctx.save();
       if (hov) {
         const mx2 = wb.x + wb.w / 2, my2 = wb.y + wb.h / 2;
@@ -5060,7 +5074,7 @@ function drawOverlay() {
     txt('按 C 复制战报 · 按 T 返回主界面', cx, hintRowY, 12, 'rgba(150,190,240,.75)', 'center', 600);
     // 结算操作按钮（悬赏码 / 海报 / 战报）
     for (const ob of overBtns()) {
-      const hov = mouse.x >= ob.x && mouse.x <= ob.x + ob.w && mouse.y >= ob.y && mouse.y <= ob.y + ob.h;
+      const hov = mouse.inside && mouse.x >= ob.x && mouse.x <= ob.x + ob.w && mouse.y >= ob.y && mouse.y <= ob.y + ob.h; // [FIX-HOV1] 同上
       ctx.save();
       ctx.fillStyle = COL.panelHi;
       ctx.strokeStyle = hov ? '#ffffff' : ob.c;
@@ -5071,7 +5085,7 @@ function drawOverlay() {
       rr(ob.x, ob.y, ob.w, ob.h, 9); ctx.fill();
       ctx.globalAlpha = 1;
       if (hov) { ctx.shadowColor = ob.c; ctx.shadowBlur = 18; rr(ob.x, ob.y, ob.w, ob.h, 9); ctx.stroke(); ctx.shadowBlur = 0; }
-      txt(ob.l, ob.x + ob.w / 2, ob.y + ob.h / 2, 12, '#f2fbff', 'center', 800);
+      txt(ob.l, ob.x + ob.w / 2, ob.y + ob.h / 2, ob.w < 96 ? 9 : 12, '#f2fbff', 'center', 800); // [R14-OVER] 窄 chip 缩字号防溢出
       ctx.restore();
     }
     ctx.globalAlpha = 1;
@@ -5461,7 +5475,8 @@ function titleAct(a) {
     const code = rushPack(G.rush);
     if (!code) { G.rushShareMsg = '空菜单无法分享 · 先添加 BOSS'; uiClick(); return; }
     copyText(rushURL(code), ok => {
-      G.rushShareMsg = ok ? '✓ 分享链接已复制 · 发给朋友迎战你的菜单' : '复制失败 · 分享码 ' + code;
+      // [R14-PROMO] 同上：短版补全为完整口径（出场序列+血量档入码，打开即迎战）
+      G.rushShareMsg = ok ? '✓ 分享链接已复制 · 发给朋友，出场序列与血量档全部入码 · 打开直接迎战你的自定义连战' : '复制失败 · 分享码 ' + code;
     });
     uiClick();
     return;
@@ -5665,6 +5680,9 @@ cv.addEventListener('pointermove', (e) => {
   const r = cv.getBoundingClientRect();
   const px = e.clientX - r.left, py = e.clientY - r.top;
   if (e.pointerType === 'touch') {
+    // [FIX-HOV1] 触屏不同步清除：混合设备上鼠标先悬停（inside=true）后改触屏，
+    // 旧 mouse.x/y 命中的按钮会滞留白圈 → 触屏事件同步清 hover 态
+    mouse.inside = false;
     if (joy.id === e.pointerId) {
       joy.dx = CL(px - joy.sx, -60, 60);
       joy.dy = CL(py - joy.sy, -60, 60);
@@ -5672,6 +5690,10 @@ cv.addEventListener('pointermove', (e) => {
     return;
   }
   mouse.x = px; mouse.y = py; mouse.inside = true;
+  // [R14-HOV] 混合设备回归：触屏一次会把 touchMode 永久锁在触屏 UI（摇杆/近敌瞄准/无准星），
+  // 之后真鼠标移动/点按再也无法唤回鼠标形态 → 真实鼠标指针事件（pointerType=mouse，触屏不合成）
+  // 到达即还原；触屏事件仍是 touch 类型，不受影响
+  if (G.touchMode) G.touchMode = false;
   G.lastMouse = G.time;
 });
 function endJoy(e) { if (joy.id === e.pointerId) { joy.id = null; joy.dx = 0; joy.dy = 0; } }
@@ -5685,6 +5707,7 @@ cv.addEventListener('pointerdown', (e) => {
   if (AC && AC.state === 'suspended') { try { AC.resume(); } catch (err) {} }
   if (e.pointerType === 'touch') {
     G.touchMode = true;
+    mouse.inside = false; // [FIX-HOV1] 触屏即清 hover 态（同上）
     if (G.state === 'title') {
       // [A11Y-T44] 触屏命中走 44px 外扩矩形（pickTouchBtn 重叠时取最近按钮）
       const tb = pickTouchBtn(titleBtns(), px, py);
@@ -5729,6 +5752,7 @@ cv.addEventListener('pointerdown', (e) => {
     return;
   }
   mouse.x = px; mouse.y = py; mouse.inside = true;
+  if (G.touchMode) G.touchMode = false; // [R14-HOV] 同上：真鼠标点按还原鼠标形态
   G.lastMouse = G.time;
   if (G.state === 'wgate') {
     let act = null;
@@ -5994,7 +6018,10 @@ window.NV_SNAP = () => ({
   cfgCb: CFG.cb, rerolls: G.rerolls,
   ebN: ebullets.length,
   ebS: ebullets.slice(-24).map(b => [b.bd || 0, b.bo || 0, Math.round(b.x), Math.round(b.y), Math.round(b.r * 10) / 10, b.bd ? (b.bo ? 3 : 4) : 0, b.c]),
-  picks: pickups.slice(0, 12).map(p => [p.k, Math.round(p.x), Math.round(p.y)])
+  picks: pickups.slice(0, 12).map(p => [p.k, Math.round(p.x), Math.round(p.y)]),
+  // [R14-HOV] hover 态断言面（[FIX-HOV1]）：msIn=鼠标真实悬停画布（hover 白圈唯一开关），
+  // ms=mouse.x/y（触屏不更新，初值 400,250），tm=触屏模式。只读，生产逻辑零依赖
+  msIn: !!mouse.inside, ms: [Math.round(mouse.x), Math.round(mouse.y)], tm: !!G.touchMode
 });
 window.NV_BTN = () => { // [A11Y-T44] 只读按钮矩形：rect=视觉矩形，touch=触屏实际生效的 44px 外扩矩形（与命中共用 touchRect）
   let list;
