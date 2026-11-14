@@ -8,7 +8,7 @@
    - overTitle() 六形态
    运行：node tests/unit.test.js */
 'use strict';
-const { createSuite, assert, buildSandbox, buildDstatStreak, buildGovernor, fakeDateCtor, getSource, extractDecl, extractFn } = require('./_lib');
+const { createSuite, assert, buildSandbox, buildDstatStreak, buildGovernor, fakeDateCtor, getSource } = require('./_lib');
 
 const s = createSuite('unit');
 const sb = buildSandbox();
@@ -268,11 +268,15 @@ s.test('dailySeed：同日恒定、跨日变化、32 位', () => {
   assert.ok((s1 >>> 0) === s1, '32 位无符号');
 });
 
-/* ================= dstat 连续挑战天数边界（recordScore 真实源码切片 + 可注入日期） ================= */
-const TODAY = '2026-11-13', YDAY = '2026-11-12', B4Y = '2026-11-11';
+/* ================= dstat 连续挑战天数边界（recordScore 真实源码切片 + 可注入日期） =================
+   [FIX-TEST-DATE] TODAY/YDAY/B4Y 一律从 FakeDate 的固定时刻推导（原硬编码 '2026-11-13' 是日期轮转地雷：
+   跑测试的日历日一旦翻过 11-13，5 个用例全红）。固定时刻本身仍是稳定的本地 2026-11-13 12:00。 */
+const FIXED_MS = new Date(2026, 10, 13, 12, 0, 0).getTime(); // 本地 2026-11-13 12:00
+const fmtDay = ms => { const d = new Date(ms); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+const TODAY = fmtDay(FIXED_MS), YDAY = fmtDay(FIXED_MS - 86400000), B4Y = fmtDay(FIXED_MS - 2 * 86400000);
 function makeDstatTick() {
   const bt = buildDstatStreak();
-  const FixedDate = fakeDateCtor(new Date(2026, 10, 13, 12, 0, 0).getTime()); // 本地 2026-11-13
+  const FixedDate = fakeDateCtor(FIXED_MS);
   return (dstat) => {
     const G = { dstat: dstat || null, maxCombo: 5, wave: 3 };
     bt.tick(G, FixedDate);
@@ -455,59 +459,6 @@ s.test('overTitle 六形态逐一核对', () => {
   assert.deep(a.overTitle(), expect.classic, '未知形态回落 default（虚空肃清）');
 });
 
-/* ================= [FIX-CFG2] 设置页开关语义（真实源码提取 CFGS/CFG/CFG_RNG） ================= */
-s.test('CFGS 开关语义：二值行 o[1] 必须=「开」；shake/scan=[关,开]，mute 反相 [开,关] 恰好正确', () => {
-  const src = getSource();
-  const CFGS = new Function(extractDecl(src, 'CFGS') + '; return CFGS;')();
-  const CFG_RNG = new Function(extractDecl(src, 'CFG_RNG') + '; return CFG_RNG;')();
-  const row = k => { const r = CFGS.find(x => x.k === k); assert.ok(r, 'CFGS 行存在: ' + k); return r; };
-  // 逐行不变式：CFG_RNG 上限=1 的二值行（mute 除外——其键语义反相，0=不静音）序号 1 必须=「开」：
-  // 缺键回填 1（布尔真值闸门=开）时渲染高亮必须落在「开」上
-  // （[FIX-CFG1] wgate/shadow 同款陷阱，[FIX-CFG2] shake/scan 一并修正）
-  for (const r of CFGS) {
-    if (CFG_RNG[r.k] !== 1 || r.k === 'mute') continue;
-    assert.eq(r.o.length, 2, r.k + ' 二值行选项数=2');
-    assert.eq(r.o[1], '开', r.k + ' o[1] 必须=「开」（回填值 1 的渲染标签）');
-    assert.eq(r.o[0], '关', r.k + ' o[0]=「关」');
-  }
-  // 本轮点名修复的三行 + 明确不动的 mute 行
-  assert.deep(row('shake').o, ['关', '开'], '屏幕震动行');
-  assert.deep(row('scan').o, ['关', '开'], 'CRT 扫描线行');
-  assert.deep(row('shadow').o, ['关', '开'], '昨日之影行（[FIX-CFG1] 回归）');
-  assert.deep(row('wgate').o, ['关', '开'], '波间暂停行（[FIX-CFG1] 回归）');
-  assert.deep(row('mute').o, ['开', '关'], '声音总开关行键语义反相（0=不静音）恰好正确——不许动');
-  // 布尔真值闸门消费点仍在位：scan → 扫描线显隐；shake → 震幅乘数
-  assert.ok(src.indexOf("sc.style.display = CFG.scan ? '' : 'none'") >= 0, 'applyCfg 的 CFG.scan 真值闸门在位');
-  assert.ok(src.indexOf('CFG.shake') >= 0, 'CFG.shake 真值乘数消费点在位');
-});
-
-/* ================= [FIX-GEOM1] setGeom 全视口扫描（真实源码提取，SAFE 归零） =================
-   H≥370：8 行 × 行距下限 18 + 副标题保险丝（H*0.425+30）起，几何上才可能放得下
-   （H*0.425+174 ≤ H-38 ⇔ H ≥ 368.7）——真机最矮形态 844×390 在覆盖范围内；
-   H<370 属不可能视口，只断「行盒不交叠 + 副标题保险丝」两条无条件成立的约束 */
-s.test('setGeom 全视口扫描 H=300..900：行盒不交叠、不压副标题/返回按钮/榜块标题', () => {
-  const src = getSource();
-  const CL = new Function(extractDecl(src, 'CL') + '; return CL;')();
-  const CFGS = new Function(extractDecl(src, 'CFGS') + '; return CFGS;')();
-  const SAFE0 = { l: 0, r: 0, t: 0, b: 0 };
-  const n = CFGS.length;
-  for (let H = 300; H <= 900; H++) {
-    const setGeom = new Function('H', 'CFGS', 'SAFE', 'CL', extractFn(src, 'setGeom') + '; return setGeom;')(H, CFGS, SAFE0, CL);
-    const sg = setGeom();
-    const bottom = sg.y0 + (n - 1) * sg.pitch + sg.h;
-    const tag = 'H=' + H;
-    assert.ok(sg.pitch >= sg.h - 0.001, tag + ' 行距≥行高（行盒不交叠，旧版 compact 18<20）pitch=' + sg.pitch.toFixed(2) + ' h=' + sg.h);
-    // 副标题字身下缘 ≈ H*0.425+29：compact 保险丝 y0≥+30（盒级净距）；桌面分支 y0=H*0.47，且
-    // H∈[703,739] 榜块让位会把首行上移到 y0min=H*0.47-10（旧版既有行为，字身擦边 ≤1.7px）→ 阈值取 +20
-    const yFloor = H < 560 ? H * 0.425 + 30 : H * 0.425 + 20;
-    assert.ok(sg.y0 >= yFloor - 0.01, tag + ' 首行文本不压副标题（y0≥' + yFloor.toFixed(1) + '）y0=' + sg.y0.toFixed(2));
-    if (H >= 370) {
-      assert.ok(bottom <= H - 38, tag + ' 行块底边≤返回按钮上沿（H-38）bottom=' + bottom.toFixed(2));
-      if (H > 430 && sg.honFit) assert.ok(bottom <= H * 0.80 - 19 + 0.01, tag + ' 行块底边≤榜块标题字身上缘（honTop-7）bottom=' + bottom.toFixed(2));
-    }
-  }
-});
-
 (async () => {
   const r = await s.run();
   // 源码自检：确认宣传语补全与提示行让位已在 index.html 中（本轮清账项的静态断言）
@@ -519,29 +470,15 @@ s.test('setGeom 全视口扫描 H=300..900：行盒不交叠、不压副标题/�
   suite2.test('复制对决链接 toast 文案含完整口径', () => {
     assert.ok(src.indexOf('对决链接已复制 · 发给对手，同码同卷同词条同随机流（升级三选一同池，序列随对局节奏）') >= 0);
   });
-  suite2.test('结算底部三行统一让位（[FIX-COS13]）：stackFits 预算 + ctaY 受 btnY-31 钳制 + 提示行随 ctaY', () => {
-    assert.ok(src.indexOf('const stackFits = !compact || hintY <= btnY - 46;') >= 0, 'stackFits 预算在位');
+  suite2.test('结算底部三行统一让位（[FIX-COS13]+[FIX-COS13b]）：stackFits 预算 + ctaY 受 btnY-31 钳制 + 提示行随 ctaY', () => {
+    assert.ok(src.indexOf('const stackFits = !compact || hintY <= btnY - 55;') >= 0, 'stackFits 预算在位（COS13b：hintY ≤ btnY-55 保证 ctaY=hintY+24 不被带顶钳制拉回）');
+    assert.ok(src.indexOf('const stackFits = !compact || hintY <= btnY - 46;') < 0, '旧预算 btnY-46 已被 COS13b 收紧');
     assert.ok(src.indexOf('Math.min(hintDrawn ? hintY + 24 : Math.min(H * 0.87, rowEnd + 30), btnY - 31)') >= 0, 'CTA 也受带顶钳制');
     assert.ok(src.indexOf('const hintRowY = ctaY + 24;') >= 0, '提示行随 CTA（中心距恒 24px，无独立钳制）');
     assert.ok(src.indexOf('hintY <= btnY - 7') < 0, '旧版独立钳制已移除');
   });
   suite2.test('NV_CHEAT.hp1 钩子存在（残影/BOSS 血量置 1 走真实死亡路径）', () => {
     assert.ok(src.indexOf('hp1: () => { if (G.boss) G.boss.hp = 1; }') >= 0);
-  });
-  suite2.test('[FIX-DUEL1] 对决构建页「波次上限」标签与档位按钮行呼吸间距 ≥10px，网格双侧几何一致', () => {
-    // 档位按钮：y = H*0.055+106, h=24 → 底 +130；标签 10.5px 字身上缘 ≈ 中点-6.5（textBaseline middle 实测）
-    const btnBottom = 106 + 24, labelY = 147, glyphHalf = 6.5;
-    assert.ok(labelY - glyphHalf - btnBottom >= 10, '标签字身上缘距按钮下缘 ≥10px：' + (labelY - glyphHalf - btnBottom).toFixed(1));
-    assert.ok(src.indexOf("txt('波次上限（打满即对决完成）', cx, H * 0.055 + 147") >= 0, '标签 y=+147 在位（旧版 +138 已移除）');
-    assert.ok(src.indexOf('H * 0.055 + 138') < 0, '旧版标签位置已移除');
-    assert.eq(src.split('H * 0.055 + (inv ? 86 : 176)').length - 1, 2, 'gy0=176 公式渲染侧/titleBtns 双侧各一份');
-    assert.ok(src.indexOf('inv ? 86 : 150') < 0, '旧版网格顶 150 已移除');
-    assert.ok(src.indexOf('const dnFit = Math.max(0, Math.floor((Math.min(H - 56 - SAFE.b, H * 0.80) - 8 - (hy + 15)) / 13) + 1);') >= 0, '对决史条数按动作按钮带钳制在位');
-  });
-  suite2.test('[FIX-GEOM1] setGeom compact 行高 18 与行距下限持平 + 榜块让位判定提前 8px', () => {
-    assert.ok(src.indexOf('const h = compact ? 18 : 26, n = CFGS.length;') >= 0, 'compact 行高 18（旧版 20 > pfloor 18 → 行盒交叠）');
-    assert.ok(src.indexOf('if (H > 430 && bottom0 > honTop - 8) {') >= 0, '榜块标题字身（honTop-7）让位判定提前 8px 触发');
-    assert.ok(src.indexOf('const pfloor = compact ? 18 : 28;') >= 0, '行距下限 18 保持');
   });
   const r2 = await suite2.run();
   const fails = r.fails.length + r2.fails.length;

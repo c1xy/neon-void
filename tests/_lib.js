@@ -134,23 +134,26 @@ function buildSandbox(env) {
   };
 }
 
-/* recordScore [DAILY2] 连续挑战天数段（真实源码切片，含 G.dstat = ds 落盘）：依赖 G/sanitizeDstat/dateStr/pad/Date/rec2 */
+/* recordScore [DAILY2] 连续挑战天数段（真实源码切片，含 G.dstat = ds 落盘）：依赖 G/sanitizeDstat/dateStr/pad/Date/rec2
+   [FIX-TEST-DATE] 切片里的 today 来自游戏源码 dateStr()（内部 new Date()）——只给切片注入 DateImpl 不够，
+   必须把同一日期同时喂进 buildSandbox 的 Date 绑定，否则 dateStr() 永远走真实日历日：
+   测试只在「跑测试的日历日 == 固定时刻日期」时碰巧绿（日期轮转即 5 例全红的事故根因）。
+   unlock 同理进沙箱（切片尾部的 unlock('daily7') 不再是 strict 下的 ReferenceError 地雷）。 */
 function buildDstatStreak(env) {
   const src = getSource();
   const block = extractBlock(src,
     'const ds = sanitizeDstat(JSON.stringify(G.dstat || {}));',
     'G.dstat = ds;', true);
-  const factory = new Function('G', 'sanitizeDstat', 'dateStr', 'pad', 'Date', 'rec2',
+  const factory = new Function('G', 'sanitizeDstat', 'dateStr', 'pad', 'Date', 'rec2', 'unlock',
     '"use strict";\nreturn function streakTick() {\n' + block + '\n};');
+  const sbEnv = env || {};
   return {
-    api: buildSandbox(env).api,
-    /* tick 注入的 DateImpl 必须同时喂给沙箱本体：dateStr() 内部 new Date() 取「今天」，
-       旧版沙箱用真实 Date → dateStr 与切片内注入的 FakeDate 各说各话，跨日即 time-bomb
-       （2026-11-14 起整组 dstat 断言翻车的根因） */
+    api: buildSandbox(sbEnv).api,
     tick(G, DateImpl, rec2) {
-      const sb = buildSandbox({ ...env, Date: DateImpl || (env && env.Date) || Date });
-      const fn = factory(G, sb.api.sanitizeDstat, sb.api.dateStr, sb.api.pad, DateImpl || (env && env.Date) || Date,
-        rec2 || { s: 0, w: 0, t: 0 });
+      const D = DateImpl || sbEnv.Date || Date;
+      const api = buildSandbox({ ...sbEnv, Date: D }).api;
+      const fn = factory(G, api.sanitizeDstat, api.dateStr, api.pad, D,
+        rec2 || { s: 0, w: 0, t: 0 }, sbEnv.unlock || (() => {}));
       fn();
       return G.dstat;
     }
@@ -176,21 +179,28 @@ function buildGovernor(env) {
   return { api: sb.api, G: sb.G, toasts: sb.toasts, makeTick(CFG, RDT) { const f = factory(CFG, sb.G, sb.api.setTier, RDT); return () => f(); } };
 }
 
-/* ---- 迷你测试框架 ---- */
+/* ---- 迷你测试框架 ----
+   NV_E2E_ONLY=子串：只跑名字含该子串的用例（调试新用例用，不影响 run-all 全量口径） */
 function createSuite(name) {
   const cases = [];
   return {
     test(n, fn) { cases.push([n, fn]); },
     async run() {
+      const only = process.env.NV_E2E_ONLY;
+      const runCases = only ? cases.filter(([n]) => n.indexOf(only) >= 0) : cases;
       let pass = 0;
       const fails = [];
       const t0 = Date.now();
-      for (const [n, fn] of cases) {
+      for (const [n, fn] of runCases) {
         try { await fn(); pass++; console.log('  \u2713 ' + n); }
-        catch (e) { fails.push([n, e]); console.log('  \u2717 ' + n + '\n      ' + (e && e.message).split('\n').join('\n      ')); }
+        catch (e) {
+          fails.push([n, e]);
+          console.log('  \u2717 ' + n + '\n      ' + (e && e.message).split('\n').join('\n      '));
+          if (e && e.stack) console.log('      at ' + e.stack.split('\n').filter(l => l.indexOf('e2e.test.js') >= 0 || l.indexOf('unit.test.js') >= 0).slice(0, 2).join('\n      at '));
+        }
       }
-      console.log(`\n[${name}] ${pass} passed, ${fails.length} failed, ${cases.length} total (${Date.now() - t0}ms)\n`);
-      return { pass, fails, total: cases.length };
+      console.log(`\n[${name}] ${pass} passed, ${fails.length} failed, ${runCases.length} total${only ? ' (NV_E2E_ONLY=\'' + only + '\', 全量 ' + cases.length + ')' : ''} (${Date.now() - t0}ms)\n`);
+      return { pass, fails, total: runCases.length };
     }
   };
 }

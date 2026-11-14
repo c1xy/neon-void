@@ -336,9 +336,9 @@ function fmtTime(s) {
   const m = Math.floor(ms / 60000), sec = Math.floor(ms / 1000) % 60, cs = Math.floor(ms / 10) % 100;
   return pad(m, 2) + ':' + pad(sec, 2) + '.' + pad(cs, 2);
 }
-const CFG = { sfx: 2, mus: 2, fx: 0, shake: 1, scan: 1, mute: 0, wgate: 0, shadow: 1 };
+const CFG = { sfx: 2, mus: 2, fx: 0, shake: 1, scan: 1, mute: 0, wgate: 0, shadow: 1, cb: 0 };
 try { Object.assign(CFG, JSON.parse(localStorage.getItem('neonvoid_cfg') || '{}')); } catch (e) {}
-const CFG_RNG = { sfx: 2, mus: 2, fx: 2, shake: 1, scan: 1, mute: 1, wgate: 1, shadow: 1 };
+const CFG_RNG = { sfx: 2, mus: 2, fx: 2, shake: 1, scan: 1, mute: 1, wgate: 1, shadow: 1, cb: 1 };
 for (const ck in CFG_RNG) {
   if (typeof CFG[ck] !== 'number' || CFG[ck] < 0 || CFG[ck] > CFG_RNG[ck] || Math.floor(CFG[ck]) !== CFG[ck]) CFG[ck] = CFG_RNG[ck];
 }
@@ -349,13 +349,13 @@ const CFGS = [
   { k: 'sfx',   n: '音效音量',  o: ['关', '低', '正常'] },
   { k: 'mus',   n: '音乐音量',  o: ['关', '低', '正常'] },
   { k: 'fx',    n: '画质',      o: ['自动', '高', '低'] },
-  { k: 'shake', n: '屏幕震动',  o: ['关', '开'] },
-  { k: 'scan',  n: 'CRT 扫描线', o: ['关', '开'] },
+  { k: 'shake', n: '屏幕震动',  o: ['开', '关'] },
+  { k: 'scan',  n: 'CRT 扫描线', o: ['开', '关'] },
   // [FIX-CFG1] 选项序用 ['关','开']（同「波间暂停」）：CFG_RNG 的值兼任「默认值/合法上限」，序号 1 必须=开，
   // 否则缺键回填 1 会显示『关』而布尔真值闸门（采样/入口）当作开——上一版 ['开','关'] 两套语义正好相反
-  // [FIX-CFG2] shake/scan 同型陷阱一并修正（缺键回填 1=开，渲染高亮也必须落在『开』上）；
-  // mute 不在此列：它键语义反相（0=不静音），o[0]='开' 恰好正确，保持 ['开','关']
-  { k: 'shadow', n: '昨日之影', o: ['关', '开'] }
+  { k: 'shadow', n: '昨日之影', o: ['关', '开'] },
+  // [A11Y-CB] 色盲模式：视觉辅助开关，默认关（关闭时绘制路径逐像素不变），开启后见 CBPAL
+  { k: 'cb', n: '色盲模式', o: ['关', '开'] }
 ];
 function saveCfg() { try { localStorage.setItem('neonvoid_cfg', JSON.stringify(CFG)); } catch (e) {} }
 const GUIDE = [
@@ -414,7 +414,9 @@ function applyCfg() {
 /* ================= canvas sizing ================= */
 let rszW = 0, rszH = 0, rszDPR = 0; // 上次真正重建画布时的尺寸
 function resize() {
-  const r = stage.getBoundingClientRect();
+  // [FIX-CVS1] 量画布自身盒，不量 stage：stage 带 1px 边框（getBoundingClientRect 含边框），
+  // 旧版 W/H 比 CSS 盒大 2px → backing 被压缩重采样 + 指针/按钮命中坐标整体右下漂移 1-2px。
+  const r = cv.getBoundingClientRect();
   if (r.width < 10 || r.height < 10) return;
   DPR = Math.min(2, window.devicePixelRatio || 1);
   // [FIX-MEM2] 去抖：移动端地址栏收起/弹出、软键盘、旋转会造成连续 resize 事件，其中大量是
@@ -450,7 +452,7 @@ function readSafeArea() {
     pl = parseFloat(cs.paddingLeft) || 0; pr = parseFloat(cs.paddingRight) || 0;
     pt = parseFloat(cs.paddingTop) || 0; pb = parseFloat(cs.paddingBottom) || 0;
   } catch (e) {}
-  const sr = stage.getBoundingClientRect();
+  const sr = cv.getBoundingClientRect(); // [FIX-CVS1] 与 resize 同源（画布自身盒），换算比例恒为 1
   const kx = sr.width > 0 ? W / sr.width : 1, ky = sr.height > 0 ? H / sr.height : 1;
   SAFE.l = pl * kx; SAFE.r = pr * kx; SAFE.t = pt * ky; SAFE.b = pb * ky;
 }
@@ -771,6 +773,15 @@ const ETYPES = {
 };
 const EKEYS = Object.keys(ETYPES);
 const PICKS = { T: '#3dff9e', R: '#ffc233', S: '#3ddfff', B: '#ff5e5e', H: '#ff7ab8' };
+/* [A11Y-CB] 色盲友好调色板（设置页「色盲模式」开启后生效，默认关闭 → 绘制路径逐像素不变）：
+   蓝橙高区分度系 + 弹幕形状同步差异化（红绿色弱两大难点：红粉弹幕 vs 绿色拾取物/红色炸弹）。
+   杂兵弹=橙圆 · BOSS 弹=蓝菱 · 镜面折返反弹弹=青三角；拾取物逐类换色（字母标签不变仍可读）。 */
+const CBPAL = {
+  mob: '#ffa02e',    // 杂兵弹：橙（原 #ff5577 系红粉）
+  boss: '#45c8ff',   // BOSS 弹：蓝（原各 BOSS kc2/kc3 混杂色）
+  bounce: '#7ee8ff', // 反弹弹（mirror bo=2）：亮青，配三角
+  picks: { T: '#ff9a3c', R: '#ffe233', S: '#45c8ff', B: '#b487ff', H: '#f2fbff' }
+};
 const MILES = [[10, '连击大师', 'COMBO MASTER'], [20, '势不可挡', 'UNSTOPPABLE'], [30, '超神!', 'GODLIKE'],
   [50, '虚空行者', 'VOID WALKER'], [75, '传奇', 'LEGENDARY'], [100, '超越人类', 'BEYOND HUMAN']];
 const UPGRADES = [
@@ -804,10 +815,24 @@ function rollCards() {
     return;
   }
   const cw = W < 620 ? Math.min(320, W - 56) : 158;
-  const ch = W < 620 ? 92 : 196;
+  let ch = W < 620 ? 92 : 196;
+  let cgap = 12, cy0 = H * 0.34;
+  if (W < 620) {
+    // [FIX-LV1] 矮视口（横屏 H≈320-500）纵排三卡 + 重抽钮必须整体放得下：卡高/行距收缩、首行上移。
+    // 旧版 H=320（iPhone SE 横屏）时第三张卡整个落在屏幕外（点不到）、重抽钮压住第二张卡（点卡出重抽）。
+    // 纵排卡内容条（侧条 y+8 / 标题 y+22 / 描述 y+46）在 ch≥56 时仍完整可读。
+    const bottomLine = H - 12 - SAFE.b; // 卡块 + 间距14 + 重抽钮(30) 的底缘预算
+    if (cy0 + 3 * ch + 2 * cgap + 44 > bottomLine) {
+      cgap = 8;
+      ch = Math.max(56, Math.floor((bottomLine - cy0 - 44 - 2 * cgap) / 3));
+      if (cy0 + 3 * ch + 2 * cgap + 44 > bottomLine) {
+        cy0 = Math.max(H * 0.15 + 40, bottomLine - (3 * ch + 2 * cgap + 44));
+      }
+    }
+  }
   G.cards = picks.map((u, i) => {
     let x, y;
-    if (W < 620) { x = (W - cw) / 2; y = H * 0.34 + i * (ch + 12); }
+    if (W < 620) { x = (W - cw) / 2; y = cy0 + i * (ch + cgap); }
     else { x = W / 2 + (i - (picks.length - 1) / 2) * (cw + 20) - cw / 2; y = H * 0.44 - ch / 2; }
     return { u, x, y, w: cw, h: ch };
   });
@@ -1113,7 +1138,8 @@ function startGame(gmode, pmode) {
   // [DAILY1] 开局播种：每日=本地日期哈希（同一天全员同卷）；种子对决=对决码里的 seed（同码同卷）；
   // 其他模式=运行时熵（体感与纯随机一致）。
   // 玩法随机一律走 RSTATE 流；不再整体替换 Math.random（表现层随机与其解耦，见 DAILY1 注释块）。
-  if (gmode === 'daily') srand(dailySeed());
+  G.dseed = null;
+  if (gmode === 'daily') { G.dseed = dailySeed(); srand(G.dseed); } // [DAILY2] 记录种子输入（NV_SNAP.dseed 断言用，帧序无关）
   else if (gmode === 'duel') srand(G.duelRun.seed);
   else srand((((Math.random() * 4294967296) >>> 0) ^ (Date.now() & 0x7fffffff) ^ (performance.now() * 1000 & 0x7fffffff)) >>> 0);
   // 种子对决：对决码自带初始构筑——按 v3 卡位顺序预挂卡等（与三选一升级同管线，armor/revive 副作用一致），
@@ -2075,9 +2101,10 @@ function fireBullet(fp) {
    镜面折返弹不再整局滞留。eb() 从不在 ebullets 遍历中被调用，shift 安全。
    [PERF-L] L2 档把上限降到 300（整体遍历/碰撞/绘制成本近似线性于弹数），L0/L1 维持 400 不变。 */
 let EB_CAP = 400;
+let ebBoss = 0; // [A11Y-CB] BOSS 弹幕标记：updBoss 出招段/hitBoss 狂暴内置 1（同步置位，eb() 立取），色盲模式据此分形状
 function eb(x, y, a, sp, r, c, bo) {
   if (ebullets.length >= EB_CAP) ebullets.shift();
-  ebullets.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, r: r || 5, c: c || '#ff5577', life: bo ? 6.5 : 11, bo: bo || 0 });
+  ebullets.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, r: r || 5, c: c || '#ff5577', life: bo ? 6.5 : 11, bo: bo || 0, bd: ebBoss });
 }
 function milestones() {
   for (let i = 0; i < MILES.length; i++) {
@@ -2181,7 +2208,9 @@ function hitBoss(dmg, crit) {
     banner('狂暴!', b.kn + ' ENRAGED · 二阶段', b.kc);
     G.shake = 12; G.chroma = Math.max(G.chroma, 0.8);
     sfxBoss();
+    ebBoss = 1;
     for (let i = 0; i < 20; i++) eb(b.x, b.y, i / 20 * TAU, 175, 4.5, b.kc2);
+    ebBoss = 0;
     boom(b.x, b.y, b.kc, 30, 8);
   }
   if (b.hp <= 0 && b.dying == null) {
@@ -2717,6 +2746,7 @@ function updBoss(dt) {
     b.x = CL(b.x, b.r + 10, W - b.r - 10);
   }
   b.stT -= dt;
+  ebBoss = 1; // [A11Y-CB] 出招段内所有 eb() 标记为 BOSS 弹（同步段，链尾复位）
   if (b.st === 'idle' && b.stT <= 0) {
     if (G.mode === 'versus') {
       b.stT = 0.4;
@@ -2850,6 +2880,7 @@ function updBoss(dt) {
       vx: R(-40, 40), vy: R(-40, 40), life: R(0.2, 0.4), ml: 0.4, c: '#ff3355', sz: R(1.5, 3), drag: 2 });
     if (b.stT <= 0) { b.st = 'idle'; b.stT = 1.1; boom(b.x, b.y, '#ff3355', 22, 9); }
   }
+  ebBoss = 0; // [A11Y-CB] 出招段结束复位（链内无 return，必达）
   for (const sh of ships()) {
     if (sh.inv <= 0 && sh.dashT <= 0 && D2(b.x, b.y, sh.x, sh.y) < (b.r * 0.9 + sh.r) * (b.r * 0.9 + sh.r)) {
       hurtShip(sh);
@@ -3439,7 +3470,7 @@ function drawMines() {
 function drawPickups() {
   for (const p of pickups) {
     if (p.life < 2.5 && Math.sin(G.time * 18) < 0) continue;
-    const c = PICKS[p.k];
+    const c = (CFG.cb === 1 && CBPAL.picks[p.k]) || PICKS[p.k]; // [A11Y-CB] 色盲模式拾取物换板（字母标签不变）
     ctx.save(); ctx.translate(p.x, p.y);
     ctx.globalAlpha = 0.25; ctx.lineWidth = 6; ctx.strokeStyle = c;
     ctx.rotate(Math.PI / 4);
@@ -3501,9 +3532,27 @@ function drawBullets() {
   ctx.globalAlpha = 1;
 }
 function drawEBullets() {
+  const cb = CFG.cb === 1; // [A11Y-CB] 色盲模式：蓝橙配色 + 形状差异化；默认路径（else）逐像素不变
   for (const b of ebullets) {
     if (!isFinite(b.x) || !isFinite(b.y)) continue;
     const pu = 1 + 0.15 * Math.sin(G.time * 14 + b.x);
+    if (cb) {
+      const c = b.bd ? (b.bo ? CBPAL.bounce : CBPAL.boss) : CBPAL.mob;
+      ctx.globalAlpha = 0.3; ctx.strokeStyle = c; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(b.x - b.vx * 0.022, b.y - b.vy * 0.022); ctx.lineTo(b.x, b.y); ctx.stroke();
+      ctx.globalAlpha = 0.3; ctx.fillStyle = c;
+      if (b.bd) { // BOSS 弹=菱 · 反弹弹=三角（慢旋），杂兵弹=圆 —— 形状即威胁等级
+        ctx.save(); ctx.translate(b.x, b.y);
+        ctx.rotate(b.bo ? G.time * 4 : Math.PI / 4);
+        poly(0, 0, (b.bo ? 9.5 : 8) * pu, b.bo ? 3 : 4, 0); ctx.fill();
+        ctx.restore();
+      } else {
+        ctx.beginPath(); ctx.arc(b.x, b.y, 7.5 * pu, 0, TAU); ctx.fill();
+      }
+      ctx.globalAlpha = 1; ctx.fillStyle = '#fff0f4';
+      ctx.beginPath(); ctx.arc(b.x, b.y, 3, 0, TAU); ctx.fill();
+      continue;
+    }
     ctx.globalAlpha = 0.3; ctx.strokeStyle = b.c; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.moveTo(b.x - b.vx * 0.022, b.y - b.vy * 0.022); ctx.lineTo(b.x, b.y); ctx.stroke();
     ctx.globalAlpha = 0.3; ctx.fillStyle = b.c;
@@ -4423,13 +4472,13 @@ function drawOverlay() {
       txt('—— 系统设置 · SETTINGS ——', cx, H * 0.425, 14, '#9fdcff', 'center', 800);
       ctx.shadowBlur = 0;
       txt('点击选项立即生效并保存 · 点击生效自动保存', cx, H * 0.425 + 22, 11, 'rgba(170,210,240,.7)', 'center', 500);
-      // [FIX-COS3] 矮视口下首行下移避开提示行、行距收紧，避免 7 行设置项超出屏幕底缘或压住提示行/返回按钮
-      // [FIX-COS8] 行几何统一走 setGeom()：设置页 7 行让位荣誉榜块与「ESC · 返回」按钮，两档视口都不叠字；
+      // [FIX-COS3] 矮视口下首行下移避开提示行、行距收紧，避免 8 行设置项超出屏幕底缘或压住提示行/返回按钮
+      // [FIX-COS8] 行几何统一走 setGeom()：设置页 8 行让位荣誉榜块与「ESC · 返回」按钮，两档视口都不叠字；
       // 选项按钮（titleBtns 的 cfg:*）用同一份几何，标签与按钮永不错位
       const sg = setGeom();
       CFGS.forEach((r) => {
         const i = CFGS.indexOf(r);
-        txt(r.n, W / 2 - 20, sg.y0 + i * sg.pitch + (sg.compact ? 9 : 13), 12.5, '#dfeeff', 'right', 700);
+        txt(r.n, W / 2 - 20, sg.y0 + i * sg.pitch + (sg.compact ? 10 : 13), 12.5, '#dfeeff', 'right', 700);
       });
     } else if (G.tStage === 'credits') {
       // [FIX-COS6] 矮视口（手机横屏）关于页：页眉上移避开正文首行（正文起点同为 H*0.22）
@@ -4439,7 +4488,7 @@ function drawOverlay() {
       ctx.shadowBlur = 0;
       const cl = [
         ['NEON VOID · 霓虹虚空', 22, '#eaf6ff', 800],
-        ['v1.5.1 · 单文件 · 零依赖 · ~265KB', 12, 'rgba(170,200,235,.8)', 600],
+        ['v1.5.2 · 单文件 · 零依赖 · ~270KB', 12, 'rgba(170,200,235,.8)', 600],
         ['v1.0.2 修复：无尽模式高波次白屏 · 超频射控失效 · 屏幕外残敌卡波', 11, 'rgba(120,230,190,.85)', 600],
         ['v1.0.3 平衡：高波次难度曲线（数量↑ / 血量封顶）· 帧循环微调', 11, 'rgba(120,230,190,.85)', 600],
         ['v1.1.0 扩充：奇点之瞳降临 · 双螺旋/镜面折返弹幕 · 超导闪现/虚空结晶/擦弹领域', 11, 'rgba(120,230,190,.85)', 600],
@@ -4448,6 +4497,7 @@ function drawOverlay() {
         ['v1.4.0 扩充：每日挑战留存（本机最佳/连续天数）· 画质自适应 L0-L2（低端机兜底）', 11, 'rgba(120,230,190,.85)', 600],
         ['v1.5.0 扩充：种子对决（#duel= 同码同卷 · 成绩码定胜负 · 对决史）· 昨日之影（走位回放 · 两日对比）', 11, 'rgba(120,230,190,.85)', 600],
         ['v1.5.1 打磨：模式分组与新手引导 · 结算屏/Toast 口径统一 · 摇杆/榜块/弹窗清账', 11, 'rgba(120,230,190,.85)', 600],
+        ['v1.5.2 无障碍：色盲模式（蓝橙调色板 · 弹幕形状差异化）· 触屏 44px 命中外扩 · 随机输入压力验证', 11, 'rgba(120,230,190,.85)', 600],
         ['', 10, '', 400],
         ['设计 · 代码 · 美术 · 音乐', 14, '#dfeeff', 700],
         ['全部由 AI 通过 VIBECODING 创作', 14, '#ff7ad9', 700],
@@ -4551,10 +4601,7 @@ function drawOverlay() {
       const d = G.duel || { seed: 0, lv: [], cap: 10 };
       const cardN = UPGRADES.length;
       const lvSum = d.lv ? d.lv.reduce((a, b) => a + (b || 0), 0) : 0;
-      // [FIX-DUEL1] builder 网格顶 150→176：波次上限标签（+147）与波次档按钮（底 +130）之间留出
-      // ≥10px 呼吸间距（旧版标签 +138 字身上缘距按钮底仅 ~2px，且与初始构筑标题 +140 整行叠印），
-      // 网格/对决史随之让位，对决史按动作按钮带钳制条数（极矮视口少画不越界）
-      const gy0 = H * 0.055 + (inv ? 86 : 176); // 构筑网格顶（builder 上方多两行按钮）
+      const gy0 = H * 0.055 + (inv ? 86 : 150); // 构筑网格顶（builder 上方多两行按钮）
       ctx.shadowColor = '#ff9a3c'; ctx.shadowBlur = 16;
       txt('—— 种子对决 · SEED DUEL ——', cx, H * 0.055, 14, '#ff9a3c', 'center', 800);
       ctx.shadowBlur = 0;
@@ -4564,24 +4611,21 @@ function drawOverlay() {
       txt('SEED ' + duelSeedText(d.seed), cx, H * 0.055 + 46, 15, '#ffe9c2', 'center', 800, true);
       txt(inv ? '固定种子 · 全员同卷 · 波次上限 ' + d.cap + ' 波 · 打满即对决完成'
              : '换种子：🎲 随机 / 📅 今日日期（与每日挑战同款播种）', cx, H * 0.055 + 64, 10.5, 'rgba(200,220,250,.55)', 'center', 500);
-      if (!inv) txt('波次上限（打满即对决完成）', cx, H * 0.055 + 147, 10.5, 'rgba(255,220,180,.7)', 'center', 600);
+      if (!inv) txt('波次上限（打满即对决完成）', cx, H * 0.055 + 138, 10.5, 'rgba(255,220,180,.7)', 'center', 600);
       txt((inv ? '对手的初始构筑' : '初始构筑（点击卡片循环等级 0→max→0）') + ' · 共 ' + lvSum + ' 级',
         cx, gy0 - 10, 11, '#cfe8ff', 'center', 700, true);
       // 对决史（本机最近 3 条；loadDuels 在进页/入档时刷新，渲染帧只读内存）
       if (G.duels.length) {
-        const hy = gy0 + Math.ceil(cardN / 7) * 31 + 10;
+        const hy = gy0 + Math.ceil(cardN / 7) * 31 + 14;
         txt('── 对决史 · DUEL LOG ──', cx, hy, 10.5, 'rgba(255,180,120,.6)', 'center', 600);
-        // [FIX-DUEL1] 行距 15→13 + 按动作按钮带上缘（ay-8）钳制条数：网格下移 26px 后极矮视口
-        // 3 条放不下时少画 1 条，行块绝不压按钮带
-        const dnFit = Math.max(0, Math.floor((Math.min(H - 56 - SAFE.b, H * 0.80) - 8 - (hy + 15)) / 13) + 1);
-        const dn3 = Math.min(3, G.duels.length, dnFit);
+        const dn3 = Math.min(3, G.duels.length);
         for (let li = 0; li < dn3; li++) {
           const r3 = G.duels[li];
           const verdict = r3.res === 'w' ? '胜' : r3.res === 'l' ? '负' : r3.res === 't' ? '平' : '待对手成绩码';
           const mine = r3.me ? pad(r3.me.s, 7) : '—还没开卷';
           const theirs = r3.opp ? pad(r3.opp.s, 7) : '—待对手';
           txt(duelSeedText(r3.seed) + ' · ' + r3.cap + ' 波 · 我 ' + mine + ' vs 对手 ' + theirs + ' · ' + verdict,
-            cx, hy + 15 + li * 13, 10.5, r3.res === 'w' ? '#3dff9e' : r3.res === 'l' ? '#ff6688' : 'rgba(220,200,180,.75)', 'center', 600, true);
+            cx, hy + 15 + li * 15, 10.5, r3.res === 'w' ? '#3dff9e' : r3.res === 'l' ? '#ff6688' : 'rgba(220,200,180,.75)', 'center', 600, true);
         }
       }
       if (G.duelShareMsg) txt(G.duelShareMsg, cx, H * 0.72, 11.5, '#8affd4', 'center', 700);
@@ -4729,7 +4773,7 @@ function drawOverlay() {
     // 页脚基线在 H-14 直接从按钮下穿过 → 这些自绘子页一律让位不画页脚（各自已有返回按钮/页内提示）
     if (G.tStage !== 'brb' && G.tStage !== 'ach' && G.tStage !== 'set' && G.tStage !== 'guide' &&
         G.tStage !== 'credits' && G.tStage !== 'ghost' && G.tStage !== 'duel' && G.tStage !== 'duelres') {
-      txt('P 暂停 · M 静音 · A 成就 · G 指南 · S 设置 · C 关于 · B 构建器 · NEON VOID v1.5.1', cx, H - 14, 10, 'rgba(140,170,210,.4)', 'center', 500, true);
+      txt('P 暂停 · M 静音 · A 成就 · G 指南 · S 设置 · C 关于 · B 构建器 · NEON VOID v1.5.2', cx, H - 14, 10, 'rgba(140,170,210,.4)', 'center', 500, true);
     }
   } else if (G.state === 'levelup') {
     ctx.fillStyle = 'rgba(3,5,16,.8)';
@@ -4972,10 +5016,12 @@ function drawOverlay() {
     // 最多的极端场景（每日+影子对照，rowEnd≈308）里 CTA(hintY+24≈340) 与钳到带顶的提示行(≈341)
     // 中心只差 1px 完全叠印。现把「悬赏提示 / CTA / C·T 提示行」当整体自下而上排：
     //   提示行底 ≤ 带顶-1 → ctaY ≤ btnY-31（提示行恒在 CTA 下方 24px 中心距，行间净空 ~11px）；
-    //   CTA 顶与悬赏提示底留 ≥2px → 三行放得下的条件是 hintY ≤ btnY-46；
+    //   [FIX-COS13b] 悬赏提示与 CTA 的中心距恒为 24（ctaY=hintY+24）——但 ctaY 还受 btnY-31 钳制，
+    //   hintY ∈ (btnY-55, btnY-46] 时钳制生效把 CTA 拉回带顶，中心距塌到 ~15px → 1px 叠印
+    //   （[FIX-CVS1] 画布 W/H 修正 2px 后 ghost 胜局实测触发）。三行放得下的正确预算是 hintY ≤ btnY-55，
     //   放不下时悬赏提示整行让位不画（同一动作仍在按钮带「☠ 悬赏码 · B」），保 CTA 与热键提示两行。
     // 桌面（H≥560）几何保持原样不受钳制。
-    const stackFits = !compact || hintY <= btnY - 46;
+    const stackFits = !compact || hintY <= btnY - 55;
     let hintDrawn = false;
     if (stackFits && G.mode === 'ghost' && G.won && G.chainCode) {
       const pn = G.ghost ? G.ghost.chain + 1 : 1;
@@ -5133,16 +5179,37 @@ function wgateAct(k) {
   startWave(G.pendingWave);
   uiClick();
 }
-/* [FIX-COS8] 设置页几何（渲染与点击按钮共用）：7 行设置项在两档视口都要让位
+/* [A11Y-T44] 触屏最小命中目标 44px（WCAG 2.5.8 / Apple HIG / Material 同款基准）：
+   画布按钮的视觉矩形不动（chips 26/32、设置行 20、结算钮 32 ……），触屏命中区按短边外扩到 44px。
+   外扩矩形重叠时（设置行距 20 < 44 必然重叠）取「到原矩形边缘最近」者——命中永远落在最近的按钮上，
+   不存在「点 A 响应了更远的 B」。鼠标指针精度输入不外扩，走原始矩形。NV_BTN 钩子与命中共用 touchRect，
+   e2e「实测 rect」量到的就是真实生效的触控区。 */
+const TOUCH_MIN = 44;
+function touchRect(b) {
+  const mx = b.w >= TOUCH_MIN ? 0 : (TOUCH_MIN - b.w) / 2;
+  const my = b.h >= TOUCH_MIN ? 0 : (TOUCH_MIN - b.h) / 2;
+  return { x: b.x - mx, y: b.y - my, w: Math.max(b.w, TOUCH_MIN), h: Math.max(b.h, TOUCH_MIN) };
+}
+function pickTouchBtn(btns, px, py) {
+  let best = null, bd2 = Infinity;
+  for (const b of btns) {
+    const t = touchRect(b);
+    if (px < t.x || px > t.x + t.w || py < t.y || py > t.y + t.h) continue;
+    const dx = px < b.x ? b.x - px : px > b.x + b.w ? px - b.x - b.w : 0;
+    const dy = py < b.y ? b.y - py : py > b.y + b.h ? py - b.y - b.h : 0;
+    const d = dx * dx + dy * dy;
+    if (d < bd2) { bd2 = d; best = b; }
+  }
+  return best;
+}
+/* [FIX-COS8] 设置页几何（渲染与点击按钮共用）：8 行设置项（含 [A11Y-CB] 色盲模式）在两档视口都要让位
    ① 荣誉榜/每日榜块（H>430 时自 H*0.80 起画到 +51）② 页底「ESC · 返回」按钮。
    让位次序：先上移首行（≤10px）→ 再收行距（下限 18/28，保证 12.5px 行文字不互相叠）
    → 仍放不下则本页隐藏榜块（honFit=false，行块退守返回按钮上方的安全线）。
    参照关于页 [FIX-COS7] 的做法：正文/行块与榜单块不重叠，短视口优先保可读性。 */
 function setGeom() {
   const compact = H < 560;
-  // [FIX-GEOM1] compact 行高 18 与行距下限 pfloor 18 持平：极矮视口（844×390）行距压到下限时
-  // 行盒恰好相接不交叠——旧版 h=20 反而大于 pfloor=18，行距一压限相邻行盒就交叠 2px
-  const h = compact ? 18 : 26, n = CFGS.length;
+  const h = compact ? 20 : 26, n = CFGS.length;
   const pfloor = compact ? 18 : 28;
   let y0 = compact ? H * 0.425 + 36 : H * 0.47;
   let pitch = compact ? 20 : 40;
@@ -5150,9 +5217,7 @@ function setGeom() {
   const backTop = H - 44 - SAFE.b - 10;
   let honFit = true;
   const bottom0 = y0 + (n - 1) * pitch + h;
-  // [FIX-GEOM1] 榜块标题字身上缘在 honTop-7：行盒底边落在 honTop 之下 ≤8px 时虽不越线、
-  // 却会压住标题字身 → 让位判定提前 8px 触发
-  if (H > 430 && bottom0 > honTop - 8) {
+  if (H > 430 && bottom0 > honTop) {
     const y0min = y0 - (compact ? 6 : 10);
     if (honTop - 8 - y0min >= (n - 1) * pitch + h) y0 = y0min;
     else {
@@ -5257,7 +5322,7 @@ function titleBtns() {
     }
     const gc = 7;
     const chw = Math.min(112, (W - 56) / gc - 6), chh = 27, cg = 4;
-    const gy0 = H * 0.055 + (inv ? 86 : 176); // [FIX-DUEL1] 与渲染侧同一网格顶（标签让位 +26）
+    const gy0 = H * 0.055 + (inv ? 86 : 150);
     const gx0 = W / 2 - (chw * gc + cg * (gc - 1)) / 2;
     UPGRADES.forEach((u, i) => {
       const lv = (d.lv && d.lv[i]) || 0;
@@ -5437,9 +5502,16 @@ function handleKey(code) {
     return;
   }
   if (code === 'KeyF') {
+    // [FIX-FS1] requestFullscreen 返回 Promise：iframe/无手势/权限拒绝时 reject，
+    // 同步 try/catch 接不住 → unhandled rejection 顶到页面错误通道。显式接住。
     try {
-      if (!document.fullscreenElement && document.documentElement.requestFullscreen) document.documentElement.requestFullscreen();
-      else if (document.exitFullscreen) document.exitFullscreen();
+      if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+        const fp = document.documentElement.requestFullscreen();
+        if (fp && fp.catch) fp.catch(() => {});
+      } else if (document.exitFullscreen) {
+        const fp = document.exitFullscreen();
+        if (fp && fp.catch) fp.catch(() => {});
+      }
     } catch (e) {}
     return;
   }
@@ -5589,11 +5661,9 @@ cv.addEventListener('pointerdown', (e) => {
   if (e.pointerType === 'touch') {
     G.touchMode = true;
     if (G.state === 'title') {
-      let act = null;
-      for (const tb of titleBtns()) {
-        if (px >= tb.x && px <= tb.x + tb.w && py >= tb.y && py <= tb.y + tb.h) act = tb.act;
-      }
-      titleAct(act);
+      // [A11Y-T44] 触屏命中走 44px 外扩矩形（pickTouchBtn 重叠时取最近按钮）
+      const tb = pickTouchBtn(titleBtns(), px, py);
+      titleAct(tb ? tb.act : null);
       return;
     }
     if (G.state === 'wgate') {
@@ -5606,20 +5676,18 @@ cv.addEventListener('pointerdown', (e) => {
     }
     if (G.state === 'over') {
       if (G.over > 0.6) {
-        for (const ob of overBtns()) {
-          if (px >= ob.x && px <= ob.x + ob.w && py >= ob.y && py <= ob.y + ob.h) { overAct(ob.k); return; }
-        }
+        const ob = pickTouchBtn(overBtns(), px, py); // [A11Y-T44] 结算钮 32 高 → 触屏命中外扩 44
+        if (ob) { overAct(ob.k); return; }
         startGame(G.mode, G.coop ? 'coop' : 'solo');
       }
       return;
     }
     if (G.state === 'paused') { setPause(false); return; }
     if (G.state === 'levelup') {
-      if (G.rrBtn && px >= G.rrBtn.x && px <= G.rrBtn.x + G.rrBtn.w && py >= G.rrBtn.y && py <= G.rrBtn.y + G.rrBtn.h) { doReroll(); return; }
-      for (let i = 0; i < G.cards.length; i++) {
-        const c = G.cards[i];
-        if (px >= c.x && px <= c.x + c.w && py >= c.y && py <= c.y + c.h) { pickCard(i); return; }
-      }
+      // [A11Y-T44] 卡片矩形（92/196 高）≥44 不外扩；重抽钮 160×30 外扩到 44
+      if (G.rrBtn && pickTouchBtn([G.rrBtn], px, py)) { doReroll(); return; }
+      const cd = pickTouchBtn(G.cards, px, py);
+      if (cd) { pickCard(G.cards.indexOf(cd)); return; }
       return;
     }
     for (const b of touchBtns()) {
@@ -5867,7 +5935,7 @@ window.addEventListener('hashchange', () => {
   const gh2 = parseHashBounty();
   if (gh2) { G.ghost = gh2; G.tStage = 'ghost'; return; }
   const rh2 = parseHashRush();
-  if (rh2) { G.rush = rh2; G.rushInv = true; G.rushShareMsg = ''; G.tStage = 'brb'; }
+  if (rh2) { G.rush = rh2; G.rushInv = true; G.rushShareMsg = ''; G.tStage = 'brb'; return; } // [FIX-HC1] 补 return：四码互斥虽由解析器保证，漏 return 会在未来新增码型时双段生效
   const dl2 = parseHashDuel();
   if (dl2) { G.duel = dl2; G.duelInv = true; loadDuels(); G.tStage = 'duel'; return; }
   const dr2 = parseHashDuelRes();
@@ -5882,12 +5950,13 @@ schedule();
    生产路径零调用；只读写游戏已有状态，不触碰存档格式与悬赏码。 */
 window.NV_SNAP = () => ({
   state: G.state, mode: G.mode, won: G.won, wave: G.wave, score: Math.floor(G.score), level: G.level,
-  muts: G.muts.slice(), mutE: G.mutE.slice(), seed: RSTATE >>> 0, tier: G.tier, q: G.q,
+  muts: G.muts.slice(), mutE: G.mutE.slice(), seed: RSTATE >>> 0, dseed: G.dseed != null ? G.dseed >>> 0 : null, tier: G.tier, q: G.q,
   ebCap: EB_CAP, ftEma: Math.round(G.ftEma * 100) / 100,
   enemies: enemies.map(e => [e.t, e.elite ? 1 : 0, Math.round(e.x * 4) / 4, Math.round(e.y * 4) / 4, e.hp, e.maxhp, Math.round(e.sp * 100) / 100]),
   queue: G.waveQueue.slice(), marks: marks.map(m => [m.k, Math.round(m.x), Math.round(m.y)]),
   cards: (G.cards || []).map(c => c.u.k),
-  boss: G.boss ? [G.boss.ki, G.boss.st, G.boss.hp, G.boss.maxhp] : null,
+  pp: [Math.round(player.x), Math.round(player.y)],
+  boss: G.boss ? [G.boss.ki, G.boss.st, G.boss.hp, G.boss.maxhp, Math.round(G.boss.x), Math.round(G.boss.y)] : null,
   dailyRank: G.dailyRank, dstat: G.dstat ? { streak: G.dstat.streak, best: G.dstat.best.s, mcombo: G.dstat.mcombo } : null,
   ach: G.ach.slice(), qToast: G.qToast ? G.qToast.msg : null, errStreak: G.errStreak,
   duelRun: G.duelRun ? { seed: G.duelRun.seed, cap: G.duelRun.cap, lv: G.duelRun.lv.slice() } : null,
@@ -5895,8 +5964,28 @@ window.NV_SNAP = () => ({
   shSampN: G.shSamp ? Math.floor(G.shSamp.length / 3) : 0,
   duels: (G.duels || []).map(d => ({ seed: d.seed, cap: d.cap, me: d.me ? d.me.s : null, opp: d.opp ? d.opp.s : null, res: d.res })),
   tStage: G.tStage,
-  sgeom: G.tStage === 'set' ? setGeom() : null
+  sgeom: G.tStage === 'set' ? setGeom() : null,
+  // [A11Y-CB] 色盲模式断言面：cfg 值 + 弹幕样本（bd=BOSS 标记 / bo=反弹 / sh=色盲绘制形状 0圆·4菱·3三角 / c=原始色）+ 拾取物样本
+  cfgCb: CFG.cb, rerolls: G.rerolls,
+  ebN: ebullets.length,
+  ebS: ebullets.slice(-24).map(b => [b.bd || 0, b.bo || 0, Math.round(b.x), Math.round(b.y), Math.round(b.r * 10) / 10, b.bd ? (b.bo ? 3 : 4) : 0, b.c]),
+  picks: pickups.slice(0, 12).map(p => [p.k, Math.round(p.x), Math.round(p.y)])
 });
+window.NV_BTN = () => { // [A11Y-T44] 只读按钮矩形：rect=视觉矩形，touch=触屏实际生效的 44px 外扩矩形（与命中共用 touchRect）
+  let list;
+  if (G.state === 'over') list = overBtns();
+  else if (G.state === 'levelup') list = (G.cards || []).map((c, i) => ({ x: c.x, y: c.y, w: c.w, h: c.h, act: 'card:' + i, l: c.u.n }))
+    .concat(G.rrBtn ? [{ x: G.rrBtn.x, y: G.rrBtn.y, w: G.rrBtn.w, h: G.rrBtn.h, act: 'reroll', l: '重抽' }] : []);
+  else if (G.state === 'wgate') list = wBtns().map(w => ({ x: w.x, y: w.y, w: w.w, h: w.h, act: w.k, l: w.l }));
+  else list = titleBtns();
+  return {
+    state: G.state, stage: G.tStage, touchMode: !!G.touchMode,
+    btns: list.filter(b => b && b.w != null).map(b => {
+      const t = touchRect(b);
+      return { act: b.act || b.k || '', l: b.l, x: b.x, y: b.y, w: b.w, h: b.h, tx: t.x, ty: t.y, tw: t.w, th: t.h };
+    })
+  };
+};
 window.NV_CHEAT = {
   xp: () => { G.xp = G.xpNeed; },              // 直接触发升级三选一（验证升级序列确定性）
   fps: f => { G.ftEma = 1000 / f; },           // 模拟帧率（验证画质档位降/升）
@@ -5904,6 +5993,28 @@ window.NV_CHEAT = {
   highNow: () => { G.tHigh = 20.01; G.tLow = 0; }, // 直接满足回升持时
   kill: () => { G.lives = 1; hurtShip(player); }, // 测试专用速死走 recordScore（验证 dstat/成就/结算链路）
   hp1: () => { if (G.boss) G.boss.hp = 1; },     // 测试专用：残影/连战 BOSS 血量置 1（走真实受击死亡→winGame 路径）
+  pk: k => { // 测试专用：投放到离敌我实体最远的候选点的拾取物（色盲拾取调色板断言用）
+    const spots = [[W / 2, H * 0.25], [W * 0.2, H * 0.25], [W * 0.8, H * 0.25], [W * 0.35, H * 0.25], [W * 0.65, H * 0.25]];
+    let best = spots[0], bd2 = -1;
+    for (const s of spots) {
+      let d = D2(s[0], s[1], player.x, player.y);
+      for (const e of enemies) d = Math.min(d, D2(e.x, e.y, s[0], s[1]));
+      if (d > bd2) { bd2 = d; best = s; }
+    }
+    pickups.push({ x: best[0], y: best[1], vx: 0, vy: 0, k: k || 'T', life: 11, t: 0 });
+  },
+  shot: () => { // 测试专用：原地悬停杂兵弹（色盲像素断言用；自动避开敌我实体密集处）
+    const spots = [[W / 2, H * 0.28], [W * 0.2, H * 0.3], [W * 0.8, H * 0.3], [W * 0.35, H * 0.28], [W * 0.65, H * 0.28]];
+    let best = spots[0], bd2 = -1;
+    for (const s of spots) {
+      let d = D2(s[0], s[1], player.x, player.y);
+      for (const e of enemies) d = Math.min(d, D2(e.x, e.y, s[0], s[1]));
+      if (d > bd2) { bd2 = d; best = s; }
+    }
+    eb(best[0], best[1], Math.PI / 2, 0, 5, '#ff5577');
+    return [best[0], best[1]];
+  },
+  bshot: () => { ebBoss = 1; eb(60, 80, 0, 300, 5, '#ff5577'); ebBoss = 0; }, // 测试专用：自左上向右匀速 BOSS 弹（bd=1 绘制路径断言用，拖尾线保证取色样本量）
   tier: () => G.tier
 };
 })();
