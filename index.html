@@ -4685,7 +4685,7 @@ function drawOverlay() {
       ctx.shadowBlur = 0;
       const cl = [
         ['NEON VOID · 霓虹虚空', 22, '#eaf6ff', 800],
-        ['v1.5.5 · 单文件 · 零依赖 · ~320KB', 12, 'rgba(170,200,235,.8)', 600],
+        ['v1.5.6 · 单文件 · 零依赖 · ~320KB', 12, 'rgba(170,200,235,.8)', 600],
         ['v1.0.2 修复：无尽模式高波次白屏 · 超频射控失效 · 屏幕外残敌卡波', 11, 'rgba(120,230,190,.85)', 600],
         ['v1.0.3 平衡：高波次难度曲线（数量↑ / 血量封顶）· 帧循环微调', 11, 'rgba(120,230,190,.85)', 600],
         ['v1.1.0 扩充：奇点之瞳降临 · 双螺旋/镜面折返弹幕 · 超导闪现/虚空结晶/擦弹领域', 11, 'rgba(120,230,190,.85)', 600],
@@ -4698,6 +4698,7 @@ function drawOverlay() {
         ['v1.5.3 收官：设置页极矮视口让位（9 行不压返回钮）· 旧档/四码迁移矩阵 · 5 分钟 monkey 压力', 11, 'rgba(120,230,190,.85)', 600],
         ['v1.5.4 打磨：触屏 hover 白圈清零 · 小窗页眉/logo 让位 · 分享码口径补全 · 结算屏可回主界面', 11, 'rgba(120,230,190,.85)', 600],
         ['v1.5.5 手感：擦弹预警环带+音调提示 · 死亡慢动作渐隐 · BOSS 出场演出 · 连杀播报节奏 · HUD 受击反馈 · 小窗叠印清零', 11, 'rgba(120,230,190,.85)', 600],
+        ['v1.5.6 压测收官：连局压测（连续 10 局完整对局 · heap≤8MB · SW 离线不劣化）· SW 升级路径回归 · 低危看板清零', 11, 'rgba(120,230,190,.85)', 600],
         ['', 10, '', 400],
         ['设计 · 代码 · 美术 · 音乐', 14, '#dfeeff', 700],
         ['全部由 AI 通过 VIBECODING 创作', 14, '#ff7ad9', 700],
@@ -4729,7 +4730,10 @@ function drawOverlay() {
         }
       }
       const fl = 0.5 + 0.5 * Math.sin(G.time * 2);
-      txt('⚡', cx, Math.min(H * 0.84, cyv + 16), 20 + fl * 5, 'rgba(255,226,100,' + (0.45 + 0.5 * fl) + ')', 'center', 800);
+      // [R16-COS] 矮视口（H<560）正文被 k7 压缩后，min(H*0.84, cyv+16) 会把 ⚡ 钳回正文最后一行内叠印
+      // （844×390 实拍 ⚡ 压「感谢游玩 · KEEP VIBING」，桌面 1280×800 不复现）→ 兜底不高于正文流末位 +6px；
+      // 桌面不受影响（flow 位 cyv+16 < H*0.84 时两式同值）
+      txt('⚡', cx, Math.max(Math.min(H * 0.84, cyv + 16), cyv + 6), 20 + fl * 5, 'rgba(255,226,100,' + (0.45 + 0.5 * fl) + ')', 'center', 800);
     } else if (G.tStage === 'ghost') {
       const gh = G.ghost;
       ctx.shadowColor = '#8affd4'; ctx.shadowBlur = 16;
@@ -4987,7 +4991,7 @@ function drawOverlay() {
     // 页脚基线在 H-14 直接从按钮下穿过 → 这些自绘子页一律让位不画页脚（各自已有返回按钮/页内提示）
     if (G.tStage !== 'brb' && G.tStage !== 'ach' && G.tStage !== 'set' && G.tStage !== 'guide' &&
         G.tStage !== 'credits' && G.tStage !== 'ghost' && G.tStage !== 'duel' && G.tStage !== 'duelres') {
-      txt('P 暂停 · M 静音 · A 成就 · G 指南 · S 设置 · C 关于 · B 构建器 · NEON VOID v1.5.5', cx, H - 14, 10, 'rgba(140,170,210,.4)', 'center', 500, true);
+      txt('P 暂停 · M 静音 · A 成就 · G 指南 · S 设置 · C 关于 · B 构建器 · NEON VOID v1.5.6', cx, H - 14, 10, 'rgba(140,170,210,.4)', 'center', 500, true);
     }
   } else if (G.state === 'levelup') {
     ctx.fillStyle = 'rgba(3,5,16,.8)';

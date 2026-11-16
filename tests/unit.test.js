@@ -723,8 +723,8 @@ s.test('存档迁移矩阵 ⑧ duels 旧行缺字段：me/opp/res/deck/t 补全 
     const idx = getSource();
     const vs = idx.match(/NEON VOID v(\d+\.\d+\.\d+)/);
     assert.ok(vs, 'index.html 页脚版本串在位');
-    assert.eq(vs[1], '1.5.5', 'index.html 版本 = 1.5.5（本轮发版）');
-    assert.eq(+m[1], 15, 'sw.js CACHE = v15（上一版 v14 + 1）');
+    assert.eq(vs[1], '1.5.6', 'index.html 版本 = 1.5.6（本轮发版）');
+    assert.eq(+m[1], 16, 'sw.js CACHE = v16（上一版 v15 + 1）');
   });
   suite2.test('[R14-HOV] hover 白圈判定带 mouse.inside 门 + 触屏事件同步清 hover 态', () => {
     // 四处 hov 判定（title 按钮/升级卡/波次闸/结算钮）全部带 inside 门——stuck hover 清零
@@ -786,6 +786,10 @@ s.test('存档迁移矩阵 ⑧ duels 旧行缺字段：me/opp/res/deck/t 补全 
   suite2.test('[R15-CHEAT] 测试钩子：combo 注入（连杀播报断言）与 gshot（环带断言）在位', () => {
     assert.ok(src.indexOf('combo: n => { G.combo = n; G.comboT = 0.01; }') >= 0);
     assert.ok(src.indexOf('const gr = G.grazeR || 32, d = gr * 1.32;') >= 0);
+  });
+  suite2.test('[R16-COS] 关于页 ⚡ 矮视口让位兜底：不高于正文流末位（旧 min(H*0.84,…) 把 ⚡ 钳回最后一行叠印）', () => {
+    assert.ok(src.indexOf("txt('⚡', cx, Math.max(Math.min(H * 0.84, cyv + 16), cyv + 6)") >= 0, '⚡ max(min(H*0.84,cyv+16), cyv+6) 让位兜底在位（844×390 实测 ⚡ 区顶 y≥344 > 正文末行）');
+    assert.ok(src.indexOf("txt('⚡', cx, Math.min(H * 0.84, cyv + 16)") < 0, '旧无兜底写法已移除');
   });
   const r2 = await suite2.run();
   const fails = r.fails.length + r2.fails.length;
