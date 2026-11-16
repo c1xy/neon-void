@@ -8,6 +8,8 @@
    色盲模式取色断言、触屏 44px、设置页开关语义往返与几何、对决构建页亮像素剖面、
    [R15-FEEL] 手感层回归（擦弹预警环带/死亡演出窗/BOSS 出场与血条白影/连杀中断播报）、
    [R15-CB×FPS] 色盲×画质降档组合矩阵、[R13-MIGRATE] 存档迁移实机（旧档一包 + v1 悬赏码）、性能基线（boot/heap/SW 离线）、
+   [R16-MARATHON] 连局压测（同一页面连续 10 局完整对局：零 pageerror · heap ≤8MB · SW 离线 ≤3s 不劣化）、
+   [R16-SWUPG] SW 升级路径（旧缓存版本→发布新版→接管后缓存/网络/导航三路资源全为新版）、
    [R13-MONKEY] 5 分钟随机输入 + 间歇 resize/visibility 切换（零 pageerror）。
    截图输出：环境变量 NV_E2E_SHOTS 指定的目录（缺省 = 系统临时目录下的 neon-void-e2e-shots）。
    运行：node tests/e2e.test.js */
@@ -24,14 +26,17 @@ const SHOTS = process.env.NV_E2E_SHOTS || path.join(os.tmpdir(), 'neon-void-e2e-
 fs.mkdirSync(SHOTS, { recursive: true });
 const VIEW = { width: 844, height: 390 }; // 横屏手机基准视口（compact 分支）
 
-/* ---------- 静态服务器（自带，no-store 防缓存串档） ---------- */
-function serveStatic() {
+/* ---------- 静态服务器（自带，no-store 防缓存串档） ----------
+   [R16-SWUPG] 可选 rootDir：SW 升级路径用例在临时目录里造「旧版→新版」两代内容，磁盘置换后
+   reload 即触发 sw.js 更新检查——服务根目录必须可替换（缺省仍为仓库根）。 */
+function serveStatic(rootDir) {
+  const ROOTSRV = rootDir || ROOT;
   const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8' };
   const srv = http.createServer((req, res) => {
     let p = decodeURIComponent((req.url || '/').split('#')[0].split('?')[0]);
     if (p === '/' || p === '//') p = '/index.html';
-    const file = path.join(ROOT, p);
-    if (!file.startsWith(ROOT) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
+    const file = path.join(ROOTSRV, p);
+    if (!file.startsWith(ROOTSRV) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
       res.writeHead(404); res.end('not found'); return;
     }
     res.writeHead(200, { 'content-type': types[path.extname(file)] || 'application/octet-stream', 'cache-control': 'no-store' });
@@ -1391,7 +1396,8 @@ async function backToTitle(b, ms) {
   });
 
   /* ================= 性能基线（采样写入测试输出：控制台表 + perf-baseline.json） ================= */
-  const PERF = { env: { node: process.version, viewport: '844x390', dpr: 1, date: new Date().toISOString() }, boot: [], heap: null, swOfflineMs: null };
+  const PERF = { env: { node: process.version, viewport: '844x390', dpr: 1, date: new Date().toISOString() },
+    boot: [], heap: null, swOfflineMs: null, marathon: null, swUpgrade: null };
   s.test('性能基线：10 形态逐一 boot ≤2s（导航起 → 形态就绪，逐形态采样）', async () => {
     // 7 模式（键盘 → 对局就绪）+ 残影/构建器/种子对决三个入口页 + 对决结果页——与 boot 回归同一形态集
     const FORMS = [
@@ -1474,6 +1480,200 @@ async function backToTitle(b, ms) {
     assert.ok(ms <= 3000, '离线启动 ' + ms + 'ms ≤ 3000ms');
     assert.ok(sn && sn.state, '离线启动后页面可交互（NV_SNAP 可读）');
     await ctx.close();
+  });
+
+  /* ================= [R16-MARATHON] 连局压测：同一页面连续 10 局完整对局 =================
+     局单（ask 口径「10 形态抽 6 + 每日 + 种子对决」再补抽 2 形态补满 10 局）：
+     classic/endless/boss/chaos/graze/versus（10 形态抽 6）→ 每日 → 种子对决 → ghost 残影悬赏 → brb 连战。
+     关键属性：全程同一 context 同一页面（不重导航、不清内存、localStorage 连续落盘），每局都是
+     完整链路：开局 → 自然对局（出兵/开火/升级/受击真实路径）→ kill 循环走 recordScore → 结算屏 → T 回标题。
+     断言：① 全程零 pageerror；② CDP 强制 GC 口径 heap 增长 ≤8MB（首局前 vs 末局后）；③ 压测后
+     SW 离线启动 ≤3s 不劣化（压测期间 stale-while-revalidate 反复 cache.put 覆写不得破坏离线缓存）。 */
+  async function marathonLaunch(b, g) {
+    if (g.kind === 'digit') { // 主菜单模式卡：数字 → 选人页 → 单人出击
+      await b.page.keyboard.press(g.digit);
+      await b.waitStage('players');
+      await b.page.keyboard.press('1');
+      await b.waitState('playing');
+    } else if (g.kind === 'hash') { // 四码入口页：清旧 hash（保证 hashchange 必触发）→ 新码直达 → Enter 出击
+      await b.page.evaluate(h => { location.hash = ''; location.hash = h; }, '#' + g.prefix + g.code);
+      await b.waitStage(g.stage);
+      await b.page.keyboard.press('Enter');
+      await b.waitState('playing');
+    } else { // 构建器（B 键 → 确认页 → Enter 出击）
+      await b.page.keyboard.press(g.key);
+      await b.waitStage('brb');
+      await b.page.keyboard.press('Enter');
+      await b.waitState('playing');
+    }
+  }
+  async function marathonRound(b, g) {
+    const t0 = Date.now();
+    await marathonLaunch(b, g);
+    const startMs = Date.now() - t0;
+    let over = null, kills = 0, levels = 0, gates = 0;
+    while (Date.now() - t0 < 90000) {
+      const sn = await b.snap();
+      if (sn.state === 'over') { over = sn; break; }
+      if (sn.state === 'levelup') { levels++; await b.page.keyboard.press('Digit1'); await b.page.waitForTimeout(220); continue; }
+      if (sn.state === 'wgate') { // 波间暂停默认关；防御性走闸（触屏点「▶ 继续作战」，无钮时键盘兜底）
+        gates++;
+        const vb = await b.page.evaluate('window.NV_BTN()');
+        const go = vb.btns.find(x => x.act === 'go');
+        if (go) await b.page.touchscreen.tap(Math.round(go.x + go.w / 2), Math.round(go.y + go.h / 2));
+        else await b.page.keyboard.press('Enter');
+        await b.page.waitForTimeout(220);
+        continue;
+      }
+      if (sn.state === 'playing' && Date.now() - t0 - startMs >= (g.runMs || 2600) && (!g.waitScore || sn.score > 0)) {
+        kills++;
+        await b.page.evaluate('window.NV_CHEAT.kill()');
+        await b.page.waitForTimeout(650);
+        continue;
+      }
+      await b.page.waitForTimeout(280);
+    }
+    assert.ok(over, g.tag + '：90s 内完成对局进入结算屏（kills=' + kills + ' levels=' + levels + ' gates=' + gates + '）');
+    assert.eq(over.mode, g.tag, g.tag + '：结算屏模式吻合');
+    assert.ok(Number.isFinite(over.wave) && Number.isFinite(over.score) && over.score >= 0, g.tag + '：结算数据可读（wave=' + over.wave + ' score=' + over.score + '）');
+    await b.page.waitForTimeout(900); // G.over>0.7 结算热键解锁
+    await b.page.keyboard.press('KeyT'); // 「⌂ 主界面 · T」真实键盘路径回标题
+    await b.waitStage('mode');
+    return { tag: g.tag, mode: over.mode, score: over.score, wave: over.wave, kills, levels, gates, ms: Date.now() - t0 };
+  }
+  s.test('连局压测：同一页面连续 10 局（10 形态抽 6 + 每日 + 种子对决 + 补抽 2 形态）— 零 pageerror · heap ≤8MB · SW 离线 ≤3s 不劣化', async () => {
+    const duelCode = codec.duelPack({ seed: 0x16D11E5, lv: [1].concat(new Array(NC - 1).fill(0)), cap: 5 });
+    const bountyCode = codec.bountyPack({ lv: [2, 1].concat(new Array(NC - 2).fill(0)), wave: 4, score: 3000, grazes: 5, chain: 1 });
+    const GAMES = [
+      { tag: 'classic', kind: 'digit', digit: '1', runMs: 2600 },
+      { tag: 'endless', kind: 'digit', digit: '2', runMs: 2600 },
+      { tag: 'boss',    kind: 'digit', digit: '3', runMs: 2600 },
+      { tag: 'chaos',   kind: 'digit', digit: '4', runMs: 2600 },
+      { tag: 'graze',   kind: 'digit', digit: '7', runMs: 2600 },
+      { tag: 'versus',  kind: 'digit', digit: '6', runMs: 2600 },
+      { tag: 'daily',   kind: 'digit', digit: '5', runMs: 2600 },
+      { tag: 'duel',    kind: 'hash', prefix: 'duel=', stage: 'duel', code: duelCode, waitScore: true, runMs: 1200 },
+      { tag: 'ghost',   kind: 'hash', prefix: 'bounty=', stage: 'ghost', code: bountyCode, runMs: 2200 },
+      { tag: 'brb',     kind: 'key', key: 'b', runMs: 2200 }
+    ];
+    const b = await boot(browser, base, { ls: { neonvoid_rush: JSON.stringify({ order: [0], tier: 0 }) } }); // brb 局需要 ≥1 BOSS 的构建档
+    await b.page.waitForFunction('navigator.serviceWorker.controller !== null', null, { timeout: 15000 }); // 先在线装 SW（压测后离线启动要靠它）
+    const client = await b.ctx.newCDPSession(b.page);
+    await client.send('HeapProfiler.enable');
+    const gcRead = async () => { // CDP 双次强制 GC → 稳定口径（同 30s heap 基线用例）
+      await client.send('HeapProfiler.collectGarbage');
+      await client.send('HeapProfiler.collectGarbage');
+      await b.page.waitForTimeout(150);
+      return b.page.evaluate('performance.memory.usedJSHeapSize');
+    };
+    const h0 = await gcRead();
+    const samples = [{ game: 'start', mb: +(h0 / 1048576).toFixed(2) }];
+    const reports = [];
+    for (const g of GAMES) {
+      const rep = await marathonRound(b, g);
+      reports.push(rep);
+      samples.push({ game: g.tag, mb: +((await b.page.evaluate('performance.memory.usedJSHeapSize')) / 1048576).toFixed(2) });
+      console.log('  · 第 ' + reports.length + '/10 局 ' + g.tag.padEnd(8) + ' score=' + String(rep.score).padStart(7) + '  wave=' + rep.wave + '  kills=' + rep.kills + ' levels=' + rep.levels + '  ' + (rep.ms / 1000).toFixed(1) + 's');
+    }
+    const h1 = await gcRead();
+    const growthMB = +((h1 - h0) / 1048576).toFixed(2);
+    console.log('  · heap：' + samples[0].mb + 'MB → ' + (h1 / 1048576).toFixed(2) + 'MB（GC 后），10 局增长 ' + growthMB + 'MB');
+    // 断言一：10 局链路完整性（每局真实结算 + 落盘链路 + 回标题）
+    assert.eq(reports.length, 10, '10 局全部走完（开局→对局→结算→回标题）');
+    for (const rep of reports) assert.ok(rep.ms > 3000, rep.tag + '：单局耗时 ' + (rep.ms / 1000).toFixed(1) + 's（自然对局+结算链路完整）');
+    assert.deep(b.errors, [], '连续 10 局零 pageerror（' + (b.errors[0] || '无') + '）');
+    // 断言二：对局落盘真实发生（recordScore 链路 10 次的存档证据）
+    const dstatNow = JSON.parse(await b.page.evaluate('localStorage.getItem("neonvoid_dstat")||"null"'));
+    const duelsNow = JSON.parse(await b.page.evaluate('localStorage.getItem("neonvoid_duels")||"[]"'));
+    assert.ok(dstatNow && dstatNow.best && dstatNow.best.s > 0, 'dstat 今日最佳已落盘（recordScore 证据）');
+    assert.ok(duelsNow.length >= 1 && duelsNow[0].me && duelsNow[0].me.s > 0, '种子对决成绩入对决史（me.s=' + (duelsNow[0] && duelsNow[0].me ? duelsNow[0].me.s : '?') + '）');
+    // 断言三：heap 增长 ≤8MB（CDP 强制 GC 口径，首局前 vs 末局后）
+    PERF.marathon = { games: reports.length, heapStartMB: +(h0 / 1048576).toFixed(2), heapEndGCMB: +(h1 / 1048576).toFixed(2), growthMB, samples, pageerrors: b.errors.length, perGame: reports };
+    assert.ok(growthMB <= 8, '10 局 heap 增长 ' + growthMB + 'MB ≤ 8MB');
+    // 断言四：压测后 SW 离线启动 ≤3s 不劣化（同一 context 断网重载 → NV_SNAP 就绪）
+    await b.ctx.setOffline(true);
+    const t1 = Date.now();
+    await b.page.goto(base + '/index.html', { waitUntil: 'load' });
+    await b.page.waitForFunction('typeof window.NV_SNAP === "function"', null, { timeout: 10000 });
+    const offlineMs = Date.now() - t1;
+    const snOff = await b.page.evaluate('window.NV_SNAP()');
+    PERF.marathon.offlineMs = offlineMs;
+    console.log('  · 压测后 SW 离线启动 ' + offlineMs + 'ms（基线套件 ' + (PERF.swOfflineMs != null ? PERF.swOfflineMs + 'ms' : '未采样') + '，state=' + snOff.state + '）');
+    assert.ok(offlineMs <= 3000, '压测后离线启动 ' + offlineMs + 'ms ≤ 3000ms（不劣化）');
+    assert.ok(snOff && snOff.state === 'title', '离线启动后游戏可交互（title）');
+    assert.deep(b.errors, [], '离线重载亦零 pageerror');
+    await b.shot('r16-marathon-done');
+    await b.ctx.close();
+  });
+
+  /* ================= [R16-SWUPG] SW 升级路径：旧缓存版本 → 发布新版 → 接管后资源全部为新版 =================
+     sw.js 版本纪律的端到端验证（[FIX-SW1]）：临时 fixture 目录先落「旧版」（index.html <html> 注入
+     data-nvswup="old" 标记 + sw.js CACHE=upg-old）→ 起 no-store 服务装旧 SW（stale-while-revalidate：
+     缓存命中=旧版字节）；磁盘置换为「新版」（data-nvswup="new" + CACHE=upg-new）→ reload 触发
+     sw.js 更新检查（no-store 每次导航必拉新，字节不同即 update found，无头实测 ~3s 后 install、
+     ~5s 后 activate 清旧缓存）→ 新 SW install（CORE 缓存=新版字节）→ skipWaiting → activate →
+     clients.claim 接管。断言接管后三路资源全部为新版：caches.keys() 只余新缓存 / 缓存内 index.html=
+     新版字节 / 经 SW fetch handler 的响应=新版，且导航文档本体=新版、游戏可交互、零 pageerror。
+     轮询用 evaluate+caches.keys() 直读（waitForFunction 字符串谓词对 Promise 表达式不等待——实测假阳性）。 */
+  async function waitCacheKeys(page, want, ms, tag) {
+    const t0 = Date.now();
+    for (;;) {
+      const ks = await page.evaluate('caches.keys()');
+      if (ks.length === want.length && want.every(k => ks.indexOf(k) >= 0)) return Date.now() - t0;
+      if (Date.now() - t0 > ms) throw new Error(tag + '：caches.keys() 未在 ' + ms + 'ms 内变为 ' + JSON.stringify(want) + '（实测 ' + JSON.stringify(ks) + '）');
+      await page.waitForTimeout(150);
+    }
+  }
+  s.test('SW 升级路径：旧版缓存接管 → 发布新版 → skipWaiting 接管后缓存/网络/导航三路资源全部为新版', async () => {
+    const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'nv-swupg-'));
+    const srcIdx = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+    const srcSw = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8');
+    const writeVer = v => {
+      assert.ok(srcIdx.indexOf('<html lang="zh-CN">') >= 0, 'index.html <html> 标记锚点在位（fixture 从真实 index.html 派生）');
+      assert.ok(/const CACHE = 'neon-void-v\d+'/.test(srcSw), 'sw.js CACHE 版本行在位（fixture 从真实 sw.js 派生）');
+      fs.writeFileSync(path.join(fixture, 'index.html'), srcIdx.replace('<html lang="zh-CN">', '<html lang="zh-CN" data-nvswup="' + v + '">'));
+      fs.writeFileSync(path.join(fixture, 'sw.js'), srcSw.replace(/const CACHE = 'neon-void-v\d+'/, "const CACHE = 'neon-void-upg-" + v + "'; // [R16-SWUPG] fixture"));
+    };
+    writeVer('old');
+    const fsrv = await serveStatic(fixture);
+    const ctx = await browser.newContext({ viewport: VIEW, deviceScaleFactor: 1, hasTouch: true });
+    const page = await ctx.newPage();
+    const errs = [];
+    page.on('pageerror', e => errs.push(String((e && e.message) || e)));
+    try {
+      // ① 旧版接管基线
+      await page.goto(fsrv.base + '/index.html', { waitUntil: 'load' });
+      await page.waitForFunction('typeof window.NV_SNAP === "function"', null, { timeout: 20000 });
+      await page.waitForFunction('navigator.serviceWorker.controller !== null', null, { timeout: 15000 });
+      await waitCacheKeys(page, ['neon-void-upg-old'], 15000, '旧版 install');
+      const oldHit = await page.evaluate("fetch('./index.html?r=' + Date.now()).then(r => r.text())");
+      assert.ok(oldHit.indexOf('data-nvswup="old"') >= 0 && oldHit.indexOf('data-nvswup="new"') < 0, '旧版接管基线：经 SW fetch handler 命中旧版缓存（stale-while-revalidate）');
+      // ② 发布新版：磁盘置换 → reload 触发 sw.js 更新检查 → 新 SW 装/接管（本次导航文档仍由旧缓存供页）
+      writeVer('new');
+      const t0 = Date.now();
+      await page.reload({ waitUntil: 'load' });
+      await page.waitForFunction('typeof window.NV_SNAP === "function"', null, { timeout: 20000 });
+      const takeoverMs = await waitCacheKeys(page, ['neon-void-upg-new'], 20000, '新版接管');
+      // ③ 接管断言：缓存名 / 缓存字节 / fetch 响应 / 导航文档 四路全为新版
+      const keys = await page.evaluate('caches.keys()');
+      assert.deep(keys, ['neon-void-upg-new'], '接管后 caches.keys() 只余新版（activate 已清旧缓存）');
+      const cached = await page.evaluate("caches.match('./index.html', { ignoreSearch: true }).then(r => r ? r.text() : '')");
+      assert.ok(cached.indexOf('data-nvswup="new"') >= 0 && cached.indexOf('data-nvswup="old"') < 0, '新缓存内 index.html = 新版字节（install addAll 落的是新版）');
+      const viaSw = await page.evaluate("fetch('./index.html?r2=' + Date.now()).then(r => r.text())");
+      assert.ok(viaSw.indexOf('data-nvswup="new"') >= 0 && viaSw.indexOf('data-nvswup="old"') < 0, '接管后经 SW fetch handler 的响应 = 新版');
+      await page.reload({ waitUntil: 'load' });
+      await page.waitForFunction('typeof window.NV_SNAP === "function"', null, { timeout: 20000 });
+      assert.eq(await page.evaluate('document.documentElement.getAttribute("data-nvswup")'), 'new', '接管后导航文档本体 = 新版（不再吃旧缓存）');
+      const sn = await page.evaluate('window.NV_SNAP()');
+      assert.ok(sn && sn.state === 'title', '升级接管后游戏可交互（NV_SNAP.state=title）');
+      assert.deep(errs, [], 'SW 升级全程零 pageerror');
+      PERF.swUpgrade = { old: 'neon-void-upg-old', new: 'neon-void-upg-new', takeoverMs, keys, docNew: true };
+      console.log('  · SW 升级接管 ' + takeoverMs + 'ms（旧缓存已清；缓存/网络/导航三路资源=新版）');
+    } finally {
+      await ctx.close();
+      fsrv.srv.close();
+      try { fs.rmSync(fixture, { recursive: true, force: true }); } catch (e) {}
+    }
   });
 
   const r = await s.run();
