@@ -683,11 +683,16 @@ s.test('存档迁移矩阵 ⑧ duels 旧行缺字段：me/opp/res/deck/t 补全 
       '#rush= 分享 toast 已补全（短版旧文案「发给朋友迎战你的菜单」已移除）');
     assert.ok(src.indexOf('发给朋友迎战你的菜单') < 0, '旧短版已移除');
   });
-  suite2.test('结算底部三行统一让位（[FIX-COS13]+[FIX-COS13b]）：stackFits 预算 + ctaY 受 btnY-31 钳制 + 提示行随 ctaY', () => {
+  suite2.test('结算底部三行统一让位（[FIX-COS13]+[FIX-COS13b]+[R15-LAY2]）：stackFits 预算 + ctaY 受 btnY-31 钳制 + 提示行随 CTA、可整行让位', () => {
     assert.ok(src.indexOf('const stackFits = !compact || hintY <= btnY - 55;') >= 0, 'stackFits 预算在位（COS13b：hintY ≤ btnY-55 保证 ctaY=hintY+24 不被带顶钳制拉回）');
     assert.ok(src.indexOf('const stackFits = !compact || hintY <= btnY - 46;') < 0, '旧预算 btnY-46 已被 COS13b 收紧');
     assert.ok(src.indexOf('Math.min(hintDrawn ? hintY + 24 : Math.min(H * 0.87, rowEnd + 30), btnY - 31)') >= 0, 'CTA 也受带顶钳制');
-    assert.ok(src.indexOf('const hintRowY = ctaY + 24;') >= 0, '提示行随 CTA（中心距恒 24px，无独立钳制）');
+    // [R15-LAY2] 极矮视口三层补强：战绩行单列溢出切双列 · CTA 下探不压战绩行 · 键盘提示行净空不足整行让位
+    assert.ok(src.indexOf('const hintRowY = ctaDrawY + 24;') >= 0, '提示行随最终绘制位 CTA（ctaDrawY 已含战绩行下探与带顶钳制）');
+    assert.ok(src.indexOf('const hintRowShow = !compact || hintRowFits(hintRowY, btnY, rowEnd);') >= 0, '键盘提示行让位判定在位（净空不足不画）');
+    assert.ok(src.indexOf('const ctaDrawY = compact') >= 0 && src.indexOf('Math.max(rowEnd + 8,') >= 0, 'CTA 下探：战绩行末之下 ≥8px，不再被带顶钳制拉回战绩行墨内');
+    assert.ok(src.indexOf('const singleFits = ry + rows.length * 15 <= btnY - 55;') >= 0, '双列触发按底部栈全预算（btnY-55）判定：单列放得下的档位维持旧几何（844×390 逐像素不变）');
+    assert.ok(src.indexOf('function hintRowFits(') >= 0, 'hintRowFits 判定收口为独立函数（CTA 钳制档位与绘制共用）');
     assert.ok(src.indexOf('hintY <= btnY - 7') < 0, '旧版独立钳制已移除');
   });
   suite2.test('NV_CHEAT.hp1 钩子存在（残影/BOSS 血量置 1 走真实死亡路径）', () => {
@@ -718,8 +723,8 @@ s.test('存档迁移矩阵 ⑧ duels 旧行缺字段：me/opp/res/deck/t 补全 
     const idx = getSource();
     const vs = idx.match(/NEON VOID v(\d+\.\d+\.\d+)/);
     assert.ok(vs, 'index.html 页脚版本串在位');
-    assert.eq(vs[1], '1.5.4', 'index.html 版本 = 1.5.4（本轮发版）');
-    assert.eq(+m[1], 14, 'sw.js CACHE = v14（上一版 v13 + 1）');
+    assert.eq(vs[1], '1.5.5', 'index.html 版本 = 1.5.5（本轮发版）');
+    assert.eq(+m[1], 15, 'sw.js CACHE = v15（上一版 v14 + 1）');
   });
   suite2.test('[R14-HOV] hover 白圈判定带 mouse.inside 门 + 触屏事件同步清 hover 态', () => {
     // 四处 hov 判定（title 按钮/升级卡/波次闸/结算钮）全部带 inside 门——stuck hover 清零
@@ -741,6 +746,46 @@ s.test('存档迁移矩阵 ⑧ duels 旧行缺字段：me/opp/res/deck/t 补全 
   suite2.test('[R14-COPY] 设置页副标题去同义反复 + 分享链接宣传语三处完整口径', () => {
     assert.ok(src.indexOf("txt('点击选项立即生效 · 自动保存到本机'") >= 0, '设置页副标题精简在位');
     assert.ok(src.indexOf('点击选项立即生效并保存') < 0, '旧同义反复句已移除');
+  });
+  suite2.test('[R15-LAY1] mode/players 页榜块让位：modeHonFit 与模式卡几何同源 + playersHintY 收口', () => {
+    assert.ok(src.indexOf('function modeHonFit() {') >= 0, 'modeHonFit 在位（720×520 canvas H≈432：卡底 386.6 > 榜顶 339.6 → 整块不画）');
+    assert.ok(src.indexOf("!(G.tStage === 'mode' && !modeHonFit()) &&") >= 0, '榜块绘制门接入 mode 页让位');
+    assert.ok(src.indexOf("!(G.tStage === 'players' && H * 0.80 - 6 < playersHintY() + 38 + 10)") >= 0, 'players 页榜块顶让位提示块末行');
+    assert.ok(src.indexOf('const py0 = playersHintY();') >= 0, '渲染侧提示块 y 收口 playersHintY()（判定/渲染同源）');
+    assert.eq(src.split('Math.max(H * 0.70, H * 0.525 + 42 + 12 + 26 + 10)').length - 1, 1, 'py0 公式只此一份（旧双份漂移源清除）');
+  });
+  suite2.test('[R15-HUD] modeTag 统一来源 + BOSS 血条白影/命中白闪 + 生命图标红闪 + 连杀播报节奏', () => {
+    assert.ok(src.indexOf('function modeTag() {') >= 0, 'modeTag() 在位（drawHUD 模式标签唯一来源，overTitle 同款纪律）');
+    assert.ok(src.indexOf("const [wt, wtc] = modeTag();") >= 0, 'drawHUD 走 modeTag()（旧 10 分支三元链移除）');
+    assert.ok(src.indexOf("G.mode === 'brb' ? 'RUSH · 自定义连战' : G.mode === 'versus'") < 0, 'drawHUD 内联三元链已清除');
+    for (const frag of ["if (G.mode === 'graze') return ['GRAZE · 擦弹专精'", "if (G.mode === 'daily') return ['DAILY · 每日 ×2'",
+      "if (G.mode === 'duel') return ['DUEL · 种子对决 ×2'"]) {
+      assert.ok(src.indexOf(frag) >= 0, 'modeTag 分支在位: ' + frag.slice(8, 40));
+    }
+    assert.ok(src.indexOf('if (b.hpGhost == null || b.hpGhost < b.hp) b.hpGhost = b.hp;') >= 0, 'hpGhost 收敛门（追平/反超即复位，versus/ghost 换血量不残留白影）');
+    assert.ok(src.indexOf("ctx.fillRect(bx + bwx, 21, ghx - bwx, 7);") >= 0 && src.indexOf('if (b.hitT > 0) {') >= 0, '血条白影残段 + 命中白闪双反馈在位');
+    assert.ok(src.indexOf("hurtK > 0 && Math.sin(G.time * 40) > 0 ? '#ff5e6e' : '#4de3ff'") >= 0, '生命图标受击红闪（0.45s ~6Hz）');
+    assert.ok(src.indexOf("banner(MILES[i][1], MILES[i][2] + ' · ×' + G.combo, '#ffc233', true, 0);") >= 0, '连杀里程碑降为 prio 0（不再踩 BOSS 出场名横幅）');
+    assert.ok(src.indexOf("if (G.combo >= 12) toast('连击中断 ×' + G.combo + ' · 节奏接上', '#ffc233');") >= 0, '连杀中断播报（≥12，toast 不占横幅位）');
+  });
+  suite2.test('[R15-FIX2/3] 死亡演出窗状态闸：禁暂停/禁技能/禁升级翻态 + 演出窗复位清单', () => {
+    assert.ok(src.indexOf("if (G.state === 'playing' && G.deadT <= 0) setPause(true);") >= 0, '演出窗内 P/ESC 不再进暂停（复活幽灵+结算丢失通道封死）');
+    assert.ok(src.indexOf("if (G.state === 'playing' && G.pending > 0 && G.deadT <= 0) {") >= 0, '演出窗内不翻 levelup（选卡 UI 压渐隐画面 + 同跳过结算）');
+    assert.eq((src.match(/G\.state !== 'playing' \|\| G\.deadT > 0/g) || []).length, 6, 'tryDash/useBomb/castRift/castOD/castUltra 五技能闸 + drawReticle 各带 deadT 门');
+    assert.ok(src.indexOf("if (G.state !== 'playing' || G.deadT > 0 || p.dashCd > 0) return;") >= 0, 'tryDash 同带 deadT 门');
+    assert.ok(src.indexOf("if (G.deadT > 0) return; // [R15-FIX2] 死亡演出窗：本体已爆，虚拟技能/炸弹键全部停用") >= 0, '触屏虚拟键演出窗停用');
+    assert.ok(src.indexOf('G.deadT = 0; G.hudHurtT = 0; G.hudShieldT = 0; // [R15-DEATH] 演出窗绝不跨局滞留') >= 0, 'goTitle 复位');
+    assert.ok(src.indexOf('G.deadT = 0; G.gzBeepT = 0; G.hudHurtT = 0; G.hudShieldT = 0;') >= 0, 'startGame 复位');
+    assert.ok(src.indexOf('G.deadT = 0; G.hudHurtT = 0; G.hudShieldT = 0; // [R15-DEATH] 看门狗恢复同清演出窗') >= 0, '看门狗复位');
+  });
+  suite2.test('[R15-FIX1/4] 小窗叠印清零：KILLCAM 标签让位按钮带 + 成就弹窗矮视口对局态让位 HUD', () => {
+    assert.ok(src.indexOf('const ky = kobs.length ? Math.min(H - 44, kobs[0].y - 13) : H - 44;') >= 0, 'KILLCAM 标签让位到按钮带顶上方 ≥13px（旧 H-44 恒定压钮）');
+    assert.ok(src.indexOf("const inGame = G.state === 'playing' || G.state === 'paused' || G.state === 'levelup' || G.state === 'wgate';") >= 0, 'achPop 对局态判定在位');
+    assert.ok(src.indexOf("const ay0 = H < 560 ? (inGame ? 140 : 92) : 142;") >= 0, '矮视口对局态弹窗落 140（旧 92 盖生命/炸弹图标行）');
+  });
+  suite2.test('[R15-CHEAT] 测试钩子：combo 注入（连杀播报断言）与 gshot（环带断言）在位', () => {
+    assert.ok(src.indexOf('combo: n => { G.combo = n; G.comboT = 0.01; }') >= 0);
+    assert.ok(src.indexOf('const gr = G.grazeR || 32, d = gr * 1.32;') >= 0);
   });
   const r2 = await suite2.run();
   const fails = r.fails.length + r2.fails.length;

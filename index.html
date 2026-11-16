@@ -123,10 +123,11 @@ const G = {
   shadowOn: false, shadowRun: false, shadowRef: null, shSamp: [], shT: 0, shAct: 0,
   waveQueue: [], waveDelay: 0, inter: 0, cleared: false,
   slow: 1, slowT: 0, hitstop: 0, shake: 0, flash: 0, chroma: 0,
+  deadT: 0, gzBeepT: 0, hudHurtT: 0, hudShieldT: 0,
   time: 0, runT: 0, over: 0, muted: false, ms: []
 };
-const player = { x: 400, y: 250, vx: 0, vy: 0, ix: 0, iy: 0, a: 0, r: 11, inv: 0, dashT: 0, dashCd: 0, dashA: 0, fireT: 0, spawnT: 0 };
-const player2 = { x: 400, y: 250, vx: 0, vy: 0, ix: 0, iy: 0, a: 0, r: 11, inv: 0, dashT: 0, dashCd: 0, dashA: 0, fireT: 0, spawnT: 0, active: false, isP2: true };
+const player = { x: 400, y: 250, vx: 0, vy: 0, ix: 0, iy: 0, a: 0, r: 11, inv: 0, dashT: 0, dashCd: 0, dashA: 0, fireT: 0, spawnT: 0, gz: 0, gzV: 0 };
+const player2 = { x: 400, y: 250, vx: 0, vy: 0, ix: 0, iy: 0, a: 0, r: 11, inv: 0, dashT: 0, dashCd: 0, dashA: 0, fireT: 0, spawnT: 0, gz: 0, gzV: 0, active: false, isP2: true };
 const PAL1 = { glow: '#4de3ff', ca: '#ff2e7e', cb: '#2ee6ff', core: '#d8fbff', fill: '#4de3ff', cockpit: '#b6f3ff', ghost: '#3ddfff' };
 const PAL2 = { glow: '#ff5ec4', ca: '#4de3ff', cb: '#ff2e7e', core: '#ffe9f7', fill: '#ff5ec4', cockpit: '#ffd9f2', ghost: '#ff7ad9' };
 function ships() { return G.coop && player2.active ? [player, player2] : [player]; }
@@ -710,7 +711,14 @@ function pad2(t, semis) {
 }
 
 /* ================= fx helpers ================= */
-function banner(m, s, c, small) { G.banner = { m, s, c: c || '#4de3ff', t: 0, d: small ? 1.5 : 2.3, small: !!small }; }
+/* [R15-RHYTHM] 横幅播报优先级：0=连杀里程碑（高频、可让位）· 1=常规波次/模式播报 · 2=关键演出
+   （BOSS 出场名横幅/狂暴/核心摧毁/胜局/自动恢复）。新横幅只在优先级 ≥ 当前、或当前已播过半程时
+   才顶掉旧横幅——BOSS 名横幅展开到一半被「连击大师」踩掉的老毛病由此清零。 */
+function banner(m, s, c, small, prio) {
+  const pr = prio == null ? 1 : prio;
+  if (G.banner && G.banner.prio > pr && G.banner.t < G.banner.d * 0.5) return;
+  G.banner = { m, s, c: c || '#4de3ff', t: 0, d: small ? 1.5 : 2.3, small: !!small, prio: pr };
+}
 /* [ELEG8-TOAST] 轻量通知统一走顶部小胶囊 toast()（与画质档位提示同一绘制管线 drawQToast）：
    原先散落的 addText 定位文案（复制成功/失败、海报失败等）各自挑 y 落点，风格与位置都不统一。 */
 function toast(msg, c) { G.qToast = { t: 0, msg, c: c || '#9fdcff' }; }
@@ -782,6 +790,7 @@ const CBPAL = {
   mob: '#ffa02e',    // 杂兵弹：橙（原 #ff5577 系红粉）
   boss: '#45c8ff',   // BOSS 弹：蓝（原各 BOSS kc2/kc3 混杂色）
   bounce: '#7ee8ff', // 反弹弹（mirror bo=2）：亮青，配三角
+  graze: '#ffe233',  // [R15-GRAZE] 擦弹预警环带：金黄（黄-蓝轴对所有常见色觉都保读；形状差异由 4 枚刻度块补足，见 drawShip）
   picks: { T: '#ff9a3c', R: '#ffe233', S: '#45c8ff', B: '#b487ff', H: '#f2fbff' }
 };
 const MILES = [[10, '连击大师', 'COMBO MASTER'], [20, '势不可挡', 'UNSTOPPABLE'], [30, '超神!', 'GODLIKE'],
@@ -917,11 +926,12 @@ function spawnBoss(n, tier, idx, hpM2, lbl) {
   // idx：连战构建器指定的 BOSS 序号（0-5）；不传则沿用连战/波次的默认轮换
   const kd = idx != null ? BOSSK[CL(idx, 0, BOSSK.length - 1)] : BOSSK[(bn - 1 + BOSSK.length) % BOSSK.length];
   const hp = Math.round((100 + 45 * bn) * kd.hpM * (hpM2 || 1));
-  G.boss = { x: W / 2, y: -90, ty: H * 0.26, r: 44, hp, maxhp: hp,
-    rot: 0, rot2: 0, st: 'enter', stT: 0, pat: -1, fireT: 0, ringA: 0, hitT: 0, bn,
+  G.boss = { x: W / 2, y: -90, ty: H * 0.26, r: 44, hp, maxhp: hp, hpGhost: hp,
+    rot: 0, rot2: 0, st: 'enter', stT: 0, pat: -1, fireT: 0, ringA: 0, hitT: 0, bn, entT: 0,
     dying: null, boomT: 0, tx: 0, ty2: 0, cvx: 0, cvy: 0, tyReal: 0,
     kn: kd.n, ken: kd.en, kc: kd.c, kc2: kd.c2, kc3: kd.c3, ks: kd.sides, kp: kd.pods, kf: kd.kf, pats: kd.pats, p2: kd.p2, ph2: false, gapI: 0, pcd: 0, ki: BOSSK.indexOf(kd) };
-  banner('⚠ ' + kd.n + ' ⚠', lbl || ((tier != null ? 'BOSS RUSH · ' + bn + ' / 6 · ' : '第 ' + n + ' 波 · ') + kd.en), kd.c);
+  // [R15-BOSSIN] 名字横幅升为关键演出级（prio 2）：连杀里程碑播报不再中途踩掉 BOSS 出场名
+  banner('⚠ ' + kd.n + ' ⚠', lbl || ((tier != null ? 'BOSS RUSH · ' + bn + ' / 6 · ' : '第 ' + n + ' 波 · ') + kd.en), kd.c, false, 2);
   sfxBoss(); G.shake = 8;
 }
 function spawnBossRush(i) {
@@ -962,7 +972,7 @@ function spawnVersusBoss() {
   G.boss.hp = G.boss.maxhp = 260;
   G.boss.kn = 'P2 · ' + G.boss.kn;
   G.boss.pcd = 0;
-  banner('对抗对决', 'VERSUS · P1 飞船 vs P2 湮灭核心', '#ff2e7e');
+  banner('对抗对决', 'VERSUS · P1 飞船 vs P2 湮灭核心', '#ff2e7e', false, 2); // [R15-RHYTHM] 同级覆盖 spawnBoss 的名字横幅
 }
 // 残影 BOSS：复用对抗模式的 BOSS 实体，但由悬赏码里的构筑推导自动出招表
 function spawnGhostBoss() {
@@ -982,7 +992,7 @@ function spawnGhostBoss() {
   G.boss.gSpm = st.spm;
   G.boss.gMv = st.mv;
   G.boss.gPh = RG(0, TAU);
-  banner('⚔ 残影悬赏', 'GHOST ECHO · 血量 ' + st.hp + ' · 出招表 ' + G.boss.gDeck.length + ' 招 · 链#' + gh.chain, '#8affd4');
+  banner('⚔ 残影悬赏', 'GHOST ECHO · 血量 ' + st.hp + ' · 出招表 ' + G.boss.gDeck.length + ' 招 · 链#' + gh.chain, '#8affd4', false, 2);
   sfxBoss(); G.shake = 8;
 }
 
@@ -1004,7 +1014,7 @@ function startWave(n) {
     if (G.mode === 'graze') {
       // 擦弹专精的 BOSS 波：BOSS 免疫且不可击杀，限时弹幕袭扰后自行撤离，撑住就算清波
       G.boss.grzLeave = 22 + n * 0.7;
-      banner('⚠ ' + G.boss.kn + ' ⚠', 'GRAZE RAID · 撑过弹幕 · BOSS 将自行撤离', '#eaff6a');
+      banner('⚠ ' + G.boss.kn + ' ⚠', 'GRAZE RAID · 撑过弹幕 · BOSS 将自行撤离', '#eaff6a', false, 2);
     }
     G.waveQueue = [];
     const cnt = 4 + Math.floor(n / 5) * 2;
@@ -1112,6 +1122,8 @@ function startGame(gmode, pmode) {
   G.dispScore = 0; G.cardT = 0; G.fade = 1; G.prevRiftCd = 0; G.prevOdCd = 0; G.rerolls = 2;
   G.boss = null; G.banner = null; G.waveQueue = []; G.cleared = false;
   G.slow = 1; G.slowT = 0; G.hitstop = 0; G.shake = 0; G.flash = 0;
+  G.deadT = 0; G.gzBeepT = 0; G.hudHurtT = 0; G.hudShieldT = 0; // [R15-DEATH][R15-HUD] 演出/反馈窗复位
+  player.gz = 0; player.gzV = 0; player2.gz = 0; player2.gzV = 0; // [R15-GRAZE] 预警环带逼近度复位
   G.runT = 0; G.over = 0; G.newHi = false;
   G.won = false; G.brush = 0; G.brushCd = 0; G.lbRank = 0; G.waveKind = 'n';
   G.endSnap = null; G.chainCode = null; autopsyCache = null; // [FIX-MEM1] 上一局的快照与海报全部释放（R 键重开不经过 goTitle）
@@ -1214,29 +1226,40 @@ function goTitle() {
   mines.length = 0; marks.length = 0; orbs.length = 0; ghosts.length = 0;
   parts.length = 0; texts.length = 0; pickups.length = 0; // [FIX-9] 残留脏粒子会让渲染持续抛异常
   G.boss = null; G.banner = null; G.achPop = null; G.sgT = 0;
+  G.deadT = 0; G.hudHurtT = 0; G.hudShieldT = 0; // [R15-DEATH] 演出窗绝不跨局滞留
   // [FIX-MEM1] 结算资源只在结算屏有消费：回标题立即释放，死亡快照不再滞留整个标题期
   G.endSnap = null; G.chainCode = null; autopsyCache = null;
   G.state = 'title'; G.tStage = 'mode';
   if (AC && AC.state === 'suspended') { try { AC.resume(); } catch (e) {} }
   uiClick();
 }
-function gameOver() {
-  G.state = 'over'; G.over = 0;
-  G.endSnap = snapStage(); // 验尸报告底图：死亡瞬间帧
-  slowmo(0.3, 1.4); G.flash = 0.7; G.shake = 20;
-  boom(player.x, player.y, '#4de3ff', 120, 18);
-  boom(player.x, player.y, '#ffffff', 50, 10);
+/* [R15-DEATH] 死亡瞬间演出（0.34s 真慢动作 + 渐隐）：旧版把 slowmo(0.3,1.4) 写在 gameOver() 里，
+   但 frame() 只在 state==='playing' 时把 G.slow 喂给 update()——gameOver 同步翻到 'over' 后该
+   慢动作从未生效过（死代码），死亡瞬间实际是定格→结算硬切。现在死亡时保持 playing 一小段：
+   G.deadT 倒计时（真实时间）驱动，world 继续以 0.28× 慢放推进（残骸/敌弹/网格在慢镜头里漂移），
+   画面同步线性压暗（render() 渐隐段），倒计时归零才进正式结算（recordScore 时机不变）。 */
+function deathCinematic(p) {
+  G.endSnap = snapStage(); // 验尸报告底图：真·死亡瞬间帧（gameOver 不再重拍，见 guard）
+  G.deadT = 0.34;
+  p.inv = 9; // 演出窗内不再受击（所有碰撞路径都有 inv 门）
+  slowmo(0.28, 0.42);
+  G.flash = 0.7; G.shake = 20; G.chroma = 1;
+  boom(p.x, p.y, '#4de3ff', 120, 18);
+  boom(p.x, p.y, '#ffffff', 50, 10);
   if (G.coop && player2.active) boom(player2.x, player2.y, '#ff5ec4', 90, 14);
-  G.chroma = 1;
   for (let i = 0; i < 14; i++) {
     const sa = R(0, TAU), ssp = R(80, 420);
-    parts.push({ type: 3, x: player.x, y: player.y, vx: Math.cos(sa) * ssp, vy: Math.sin(sa) * ssp,
+    parts.push({ type: 3, x: p.x, y: p.y, vx: Math.cos(sa) * ssp, vy: Math.sin(sa) * ssp,
       life: R(0.5, 1.1), ml: 1.1, c: i % 3 ? '#4de3ff' : '#ffffff', sz: R(3.5, 7.5), drag: 1.8, rot: R(0, TAU), vrot: R(-10, 10) });
   }
-  gridPush(player.x, player.y, Math.max(W, H) * 0.8, 1500);
+  gridPush(p.x, p.y, Math.max(W, H) * 0.8, 1500);
   for (const b of ebullets) sparkHit(b.x, b.y, '#ff5577');
   ebullets.length = 0;
   sfxOver();
+}
+function gameOver() {
+  G.state = 'over'; G.over = 0;
+  if (!G.endSnap) G.endSnap = snapStage(); // [R15-DEATH] 死亡演出窗已拍过死亡帧；guard 兜底直接死局路径
   recordScore();
 }
 function recordScore() {
@@ -2056,6 +2079,12 @@ function overAct(k) {
   else if (k === 'title') { goTitle(); return; } // [R14-OVER] 触屏回主界面（同键盘 T）
   else if (k === 'report') copyText(battleReport(), ok => toast(ok ? '✓ 战报已复制到剪贴板' : '复制失败，请手动截图', ok ? '#3dff9e' : '#ff6688'));
 }
+/* [R15-LAY2] 结算底部键盘提示行让位判定：提示行墨身（±7px）与战绩行末（rowEnd）、按钮带顶（btnY）
+   双向净空不足就整行不画——480×320 极窄档（canvas H≈288）实测提示行叠进「对决种子/击杀数」行
+   （R14 遗留复现）。C/T 动作仍在按钮带「复制战报 · C」「⌂ 主界面 · T」，信息不丢。 */
+function hintRowFits(y, btnY, rowEnd) {
+  return y + 7 <= btnY - 2 && y - 7 >= rowEnd + 6;
+}
 function winGame() {
   G.state = 'over'; G.over = 0; G.won = true;
   G.endSnap = snapStage(); // 海报底图：胜利瞬间帧
@@ -2065,7 +2094,7 @@ function winGame() {
   ebullets.length = 0; mines.length = 0; marks.length = 0; G.waveQueue = [];
   banner((G.mode === 'boss' || G.mode === 'brb') ? '全灭达成' : G.mode === 'versus' ? 'P1 获胜' : G.mode === 'ghost' ? '残影讨伐' : G.mode === 'duel' ? '对决完成' : '战役通关',
     G.mode === 'boss' ? 'ALL BOSSES DOWN' : G.mode === 'brb' ? 'CUSTOM RUSH CLEAR · 自定义连战达成' : G.mode === 'versus' ? 'SHIP WINS · VERSUS' : G.mode === 'ghost' ? 'GHOST SLAIN · 击杀链 +' + ((G.ghost ? G.ghost.chain : 0) + 1) : G.mode === 'duel' ? 'DUEL COMPLETE · 打满 ' + (G.duelRun ? G.duelRun.cap : G.wave) + ' 波' : 'SECTOR CLEARED',
-    G.mode === 'versus' ? '#4de3ff' : G.mode === 'ghost' ? '#8affd4' : G.mode === 'duel' ? '#ff9a3c' : '#ffc233');
+    G.mode === 'versus' ? '#4de3ff' : G.mode === 'ghost' ? '#8affd4' : G.mode === 'duel' ? '#ff9a3c' : '#ffc233', false, 2);
   if (G.mode === 'classic') unlock('win');
   else if (G.mode === 'boss') unlock('rush');
   if (G.mode === 'classic' || G.mode === 'boss') {
@@ -2119,7 +2148,8 @@ function milestones() {
     const m = MILES[i][0];
     if (G.combo >= m && G.ms.indexOf(m) < 0) {
       G.ms.push(m);
-      banner(MILES[i][1], MILES[i][2] + ' · ×' + G.combo, '#ffc233', true);
+      // [R15-RHYTHM] 里程碑是低优先级播报（prio 0）：BOSS 出场名横幅/狂暴提示在播时不再被踩掉
+      banner(MILES[i][1], MILES[i][2] + ' · ×' + G.combo, '#ffc233', true, 0);
       G.chroma = Math.max(G.chroma, 0.55);
       sfxMile(i + 1);
     }
@@ -2213,7 +2243,7 @@ function hitBoss(dmg, crit) {
   if (b.hp > 0 && b.hp <= b.maxhp / 2 && !b.ph2) {
     b.ph2 = true;
     b.pat = -1; b.st = 'idle'; b.stT = 0.7; b.fireT = 0;
-    banner('狂暴!', b.kn + ' ENRAGED · 二阶段', b.kc);
+    banner('狂暴!', b.kn + ' ENRAGED · 二阶段', b.kc, false, 2);
     G.shake = 12; G.chroma = Math.max(G.chroma, 0.8);
     sfxBoss();
     ebBoss = 1;
@@ -2248,7 +2278,7 @@ function finishBoss(b) {
   gridPush(b.x, b.y, Math.max(W, H) * 0.9, 1700);
   const pts = 1500 + 500 * b.bn;
   addScore(pts);
-  banner('核心摧毁', 'CORE DESTROYED · +' + pts, '#ffc233');
+  banner('核心摧毁', 'CORE DESTROYED · +' + pts, '#ffc233', false, 2);
   const ks = ['T', 'R', 'B', 'H'];
   for (let i = 0; i < 4; i++) pickups.push({ x: b.x + RG(-40, 40), y: b.y + RG(-30, 30), vx: RG(-60, 60), vy: RG(-60, 60), k: ks[i], life: 12, t: 0 });
   for (let i = 0; i < 30; i++) {
@@ -2264,7 +2294,7 @@ function finishBoss(b) {
       G.evoN++;
       if (G.evoN >= 3) unlock('evo3');
       const mu = MUTATORS.find(m => m.k === k2);
-      banner('词条进化!', mu.n + ' → ' + mu.en, mu.c);
+      banner('词条进化!', mu.n + ' → ' + mu.en, mu.c, false, 2);
       G.chroma = Math.max(G.chroma, 0.7);
       sfxLevel();
     }
@@ -2299,6 +2329,7 @@ function hurtShip(p) {
     boom(p.x, p.y, '#3ddfff', 28, 8);
     addText(p.x, p.y - 26, '护盾破碎', '#3ddfff', 15);
     p.inv = 1.2; G.shake = 10;
+    G.hudShieldT = 0.45; // [R15-HUD] 护盾破碎：顶右角落青色瞬时反馈（与红伤闪同位不同色）
     tone('sawtooth', 500, 120, 0.25, 0.15);
     return;
   }
@@ -2311,6 +2342,7 @@ function hurtShip(p) {
   gridPush(p.x, p.y, 240, 950);
   G.combo = 0; G.comboT = 0;
   p.inv = 2.2;
+  G.hudHurtT = 0.45; // [R15-HUD] 生命图标红闪 + 顶右角落红晕（drawHUD 受击瞬时反馈）
   slowmo(0.35, 0.7);
   for (let i = ebullets.length - 1; i >= 0; i--) {
     if (D2(ebullets[i].x, ebullets[i].y, p.x, p.y) < 130 * 130) {
@@ -2332,17 +2364,17 @@ function hurtShip(p) {
       gridPush(p.x, p.y, Math.max(W, H) * 0.6, 1200);
       G.shake = 14; G.flash = 0.5; G.chroma = 1;
       addScore(1000);
-      banner('共鸣核心启动', 'RESONANCE · 从死亡中重生', '#ff9ade');
+      banner('共鸣核心启动', 'RESONANCE · 从死亡中重生', '#ff9ade', false, 2);
       unlock('undying');
       sfxLevel();
       addText(p.x, p.y - 42, '共鸣重生!', '#ff9ade', 18);
-    } else gameOver();
+    } else deathCinematic(p); // [R15-DEATH] 死亡演出窗 → frame() 倒计时归零后进 gameOver
   }
   else addText(p.x, p.y - 30, '受到伤害!', '#ff6688', 17);
 }
 function tryDash(tp) {
   const p = tp || player;
-  if (G.state !== 'playing' || p.dashCd > 0) return;
+  if (G.state !== 'playing' || G.deadT > 0 || p.dashCd > 0) return; // [R15-FIX2] 死亡演出窗停技能
   if (!tp || tp === player) shadowAction(SH_ACT.dash); // 只记 P1 的动作（影回放的是 P1 走位）
   let ix = p.ix, iy = p.iy;
   if (!ix && !iy) { ix = Math.cos(p.a); iy = Math.sin(p.a); }
@@ -2359,7 +2391,7 @@ function tryDash(tp) {
   }
 }
 function useBomb() {
-  if (G.state !== 'playing' || G.bombs <= 0) return;
+  if (G.state !== 'playing' || G.deadT > 0 || G.bombs <= 0) return; // [R15-FIX2] 死亡演出窗停技能
   G.bombs--;
   G.bombsUsed++;
   shadowAction(SH_ACT.bomb);
@@ -2391,7 +2423,7 @@ function useBomb() {
   addText(player.x, player.y - 40, '清屏轰炸', '#ffe233', 20);
 }
 function castRift() {
-  if (G.state !== 'playing' || G.riftCd > 0) return;
+  if (G.state !== 'playing' || G.deadT > 0 || G.riftCd > 0) return; // [R15-FIX2] 死亡演出窗停技能
   G.riftCd = 25; G.riftT = 3.5;
   shadowAction(SH_ACT.rift);
   sfxRift();
@@ -2400,7 +2432,7 @@ function castRift() {
   addText(player.x, player.y - 34, '时间裂缝 TIME RIFT', '#7db4ff', 16);
 }
 function castOD() {
-  if (G.state !== 'playing' || G.odCd > 0) return;
+  if (G.state !== 'playing' || G.deadT > 0 || G.odCd > 0) return; // [R15-FIX2] 死亡演出窗停技能
   G.odCd = 30; G.odT = 5;
   shadowAction(SH_ACT.od);
   sfxOD();
@@ -2409,7 +2441,7 @@ function castOD() {
   addText(player.x, player.y - 34, '超载! OVERDRIVE', '#ffc233', 16);
 }
 function castUltra() {
-  if (G.state !== 'playing' || G.sgT > 0 || G.ultra < 100) return;
+  if (G.state !== 'playing' || G.deadT > 0 || G.sgT > 0 || G.ultra < 100) return; // [R15-FIX2] 死亡演出窗停技能
   G.ultra = 0; G.ultraCasts++;
   shadowAction(SH_ACT.ultra);
   if (G.ultraCasts >= 3) unlock('ultra3');
@@ -2442,6 +2474,7 @@ function collect(p, sh) {
 
 /* ================= updates ================= */
 function updPlayer(dt) {
+  if (G.deadT > 0) return; // [R15-DEATH] 死亡演出窗：本体已爆，停输入停开火（P2 双人时继续作战 0.34s）
   let ix = 0, iy = 0;
   const vsBoss = G.mode === 'versus' || G.mode === 'ghost';
   if (keys.has('KeyA') || (!G.coop && !vsBoss && keys.has('ArrowLeft'))) ix--;
@@ -2687,6 +2720,9 @@ function updBoss(dt) {
   const spm = (b.ph2 ? 1.15 : 1) * (G.mode === 'ghost' && b.gSpm ? b.gSpm : 1);
   b.rot += dt * 0.8 * (b.ph2 ? 2 : 1); b.rot2 -= dt * 1.4 * (b.ph2 ? 2.5 : 1);
   b.hitT = Math.max(0, b.hitT - dt);
+  // [R15-HUD] BOSS 血条受击白影：hpGhost 缓慢向真实血量收敛，被打掉的血以白色残段短暂留在条上
+  if (b.hpGhost == null || b.hpGhost < b.hp) b.hpGhost = b.hp;
+  else b.hpGhost = Math.max(b.hp, b.hpGhost - b.maxhp * 0.42 * dt);
   if (b.dying != null) {
     b.dying -= dt; b.rot += dt * 6;
     b.boomT -= dt;
@@ -2698,8 +2734,17 @@ function updBoss(dt) {
     return;
   }
   if (b.st === 'enter') {
+    b.entT += dt;
     b.y = LP(b.y, b.ty, 1 - Math.exp(-1.6 * dt));
-    if (Math.abs(b.y - b.ty) < 4) { b.st = 'idle'; b.stT = 1.2; }
+    if (Math.abs(b.y - b.ty) < 4) {
+      b.st = 'idle'; b.stT = 1.2;
+      // [R15-BOSSIN] 落位冲击：入场镜头收束瞬间给一圈冲击波 + 低频落点音（旧版入场无声无息，
+      // 光柱/条纹（drawBoss enter 段）直接切到普通战斗态，缺乏「它到位了」的重量感）
+      boom(b.x, b.y, b.kc, 26, 9);
+      G.shake = Math.max(G.shake, 9);
+      tone('sine', 95, 32, 0.5, 0.4);
+      tone('square', 210, 70, 0.28, 0.1);
+    }
     return;
   }
   // 擦弹专精 BOSS：倒计时结束即停手撤离，飞出屏幕后释放 boss 槽（本波按清空结算，无伤另有成就）
@@ -2948,6 +2993,9 @@ function updBullets(dt) {
   }
 }
 function updEBullets(dt) {
+  // [R15-GRAZE] 预警环带半径随擦弹领域升级走（grazeR 最大 48 → 环带外缘 ~91px）
+  const gzR = G.grazeR || 32, GZ_OUT2 = (gzR * 1.9) * (gzR * 1.9);
+  for (const sh of ships()) sh.gz = 0;
   for (let i = ebullets.length - 1; i >= 0; i--) {
     const b = ebullets[i];
     b.x += b.vx * dt; b.y += b.vy * dt; b.life -= dt;
@@ -2971,7 +3019,16 @@ function updEBullets(dt) {
     }
     if (!dead && !b.grazed) {
       for (const sh of ships()) {
-        if (D2(b.x, b.y, sh.x, sh.y) < (G.grazeR || 32) * (G.grazeR || 32)) {
+        // [R15-GRAZE] 擦弹时间窗可视化·检测段：未擦过的弹进入 grazeR~1.9×grazeR 预警环带时，
+        // 按逼近度（0=环带外缘 → 1=贴到擦弹边界）记到飞船 sh.gz（本帧最大者胜出）。
+        // 平滑值 sh.gzV 与环带绘制/音调提示在 update() 末段统一处理。
+        const gdd2 = D2(b.x, b.y, sh.x, sh.y);
+        if (gdd2 < GZ_OUT2) {
+          const gdd = Math.sqrt(gdd2);
+          const prox = gdd <= gzR ? 1 : 1 - (gdd - gzR) / (gzR * 0.9);
+          if (prox > sh.gz) sh.gz = prox;
+        }
+        if (gdd2 < gzR * gzR) {
           b.grazed = true; G.grazes++; G.waveGrz = (G.waveGrz || 0) + 1;
           G.ultra = Math.min(100, G.ultra + 3 * (G.grazeP || 1));
           if (G.grazes >= 100) unlock('graze100');
@@ -3130,6 +3187,7 @@ function updOrbs(dt) {
 }
 function waveLogic(dt) {
   if (G.mode === 'versus' || G.mode === 'ghost') return;
+  if (G.deadT > 0) return; // [R15-DEATH] 死亡演出窗：冻结波次推进（最后一杀与死亡同帧时不再弹波次闸/开新波）
   if (G.mode === 'boss' || G.mode === 'brb') {
     if (G.waveQueue.length > 0) {
       G.waveDelay -= dt;
@@ -3267,6 +3325,19 @@ function update(dt) {
   updPickups(dt);
   updOrbs(dt);
   updParts(dt); updTexts(dt); updGhosts(dt);
+  // [R15-GRAZE] 擦弹时间窗·反馈段：逼近度平滑（指数趋近，弹幕高速掠过时不闪烁）+
+  // 音调提示——音高/音量随逼近度上行（贴得越近音越尖），~0.11s 节流防连续擦弹时爆音。
+  // 静音/音频未就绪由 tone() 自身闸门兜底，这里只管节流与复位。
+  for (const sh of ships()) {
+    sh.gzV = LP(sh.gzV, sh.gz, 1 - Math.exp(-14 * dt));
+    if (sh.gz > 0.12) {
+      G.gzBeepT -= dt;
+      if (G.gzBeepT <= 0) {
+        G.gzBeepT = 0.11;
+        tone('sine', 540 + 700 * sh.gz, null, 0.06, 0.03 + 0.05 * sh.gz);
+      }
+    } else G.gzBeepT = Math.max(G.gzBeepT - dt, 0);
+  }
   if (G.sgT > 0) {
     G.sgT -= dt;
     gridPush(G.sgX, G.sgY, 300, -1100, dt);
@@ -3303,7 +3374,15 @@ function update(dt) {
     }
   }
   decay(dt);
-  if (G.comboT > 0) { G.comboT -= dt; if (G.comboT <= 0) G.combo = 0; }
+  // [R15-RHYTHM] 连杀中断播报：≥12 连击自然超时打断时顶部胶囊轻提示（toast 不占横幅位，
+  // 也不打扰音效节奏；受击清连击那边本身就有大额受击反馈，不重复播报）
+  if (G.comboT > 0) {
+    G.comboT -= dt;
+    if (G.comboT <= 0) {
+      if (G.combo >= 12) toast('连击中断 ×' + G.combo + ' · 节奏接上', '#ffc233');
+      G.combo = 0;
+    }
+  }
   if (G.triple > 0) G.triple -= dt;
   if (G.rapid > 0) G.rapid -= dt;
   if (G.riftT > 0) G.riftT -= dt;
@@ -3666,6 +3745,28 @@ function drawBoss() {
   const b = G.boss;
   if (!b) return;
   if (!isFinite(b.x) || !isFinite(b.y)) return;
+  if (b.st === 'enter') {
+    // [R15-BOSSIN] 出场演出（入场镜头 ~1.4s）：纵向入场光柱 + 上下危险条纹 + 本体缩放渐显。
+    // 光柱只在入场段存在，落位后（updBoss enter 分支）切普通战斗态并给落位冲击波——
+    // 名字横幅（spawnBoss prio 2）+ 光柱 + 条纹 + 落位冲击 = 完整登场镜头，弹幕开打前先「亮相差明」。
+    const ent = CL((b.entT || 0) / 1.25, 0, 1);
+    const pulse = 0.5 + 0.5 * Math.sin(G.time * 9);
+    ctx.save();
+    const grd = ctx.createLinearGradient(0, 0, 0, b.y + b.r);
+    grd.addColorStop(0, b.kc);
+    grd.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.globalAlpha = (1 - ent) * 0.3 + 0.08;
+    ctx.fillStyle = grd;
+    ctx.fillRect(b.x - b.r * 1.7, 0, b.r * 3.4, b.y + b.r);
+    ctx.globalAlpha = (1 - ent * 0.7) * (0.25 + 0.3 * pulse);
+    ctx.strokeStyle = b.kc; ctx.lineWidth = 2;
+    ctx.setLineDash([14, 10]);
+    ctx.beginPath(); ctx.moveTo(0, b.r * 0.9); ctx.lineTo(W, b.r * 0.9); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, b.y + b.r + 26); ctx.lineTo(W, b.y + b.r + 26); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
   if (b.ph2) {
     const pp = 0.5 + 0.5 * Math.sin(G.time * 8);
     ctx.save();
@@ -3724,6 +3825,7 @@ function drawBoss() {
     ctx.restore();
   }
   ctx.save(); ctx.translate(b.x, b.y);
+  if (b.st === 'enter') { const esc2 = 0.45 + 0.55 * CL((b.entT || 0) / 1.1, 0, 1); ctx.scale(esc2, esc2); } // [R15-BOSSIN] 本体缩放渐显
   const flash = b.hitT > 0;
   ctx.globalAlpha = 0.25; ctx.lineWidth = 10; ctx.strokeStyle = b.kc;
   poly(0, 0, b.r, b.ks, b.rot); ctx.stroke();
@@ -3843,9 +3945,40 @@ function drawShadowGhost() {
 }
 function drawShip(p, pal) {
   if (G.state === 'over') return;
+  if (p === player && G.deadT > 0) return; // [R15-DEATH] 死亡演出窗：飞船已爆，不再绘制本体
   const blink = p.inv > 0 && Math.sin(G.time * 30) > 0;
   ctx.save();
   ctx.translate(p.x, p.y);
+  // [R15-GRAZE] 擦弹时间窗·预警环带（不随船体旋转，画在 translate 后 rotate 前）：
+  // gzV=0..1 逼近度——敌弹进入 1.9×grazeR 外缘开始点亮，越贴越亮；>0.72 时船体外再加一圈
+  // 「马上就擦到」高亮。色盲模式同色板金黄（黄-蓝轴全色觉可读）+ 4 枚旋转刻度块做形状差异。
+  const gz = p.gzV || 0;
+  if (gz > 0.02 && G.state === 'playing') {
+    const cb = CFG.cb === 1;
+    const gc = cb ? CBPAL.graze : '#ffe233';
+    const gr = G.grazeR || 32;
+    ctx.save();
+    ctx.strokeStyle = gc;
+    ctx.lineWidth = 1.2 + 1.7 * gz;
+    ctx.globalAlpha = 0.10 + 0.42 * gz;
+    ctx.setLineDash([5, 6]);
+    ctx.beginPath(); ctx.arc(0, 0, gr * (1.02 - 0.1 * gz), 0, TAU); ctx.stroke();
+    ctx.setLineDash([]);
+    if (cb) {
+      for (let ti = 0; ti < 4; ti++) {
+        const ta = G.time * 1.4 + ti * Math.PI / 2;
+        ctx.globalAlpha = (0.22 + 0.4 * gz) * (0.6 + 0.4 * Math.sin(G.time * 6 + ti * 1.6));
+        ctx.fillRect(Math.cos(ta) * gr - 2.5, Math.sin(ta) * gr - 2.5, 5, 5);
+      }
+    }
+    if (gz > 0.72) { // 贴边最后提示：船体轮廓外亮环
+      ctx.globalAlpha = (gz - 0.72) * 2.4;
+      ctx.lineWidth = 2.2;
+      ctx.beginPath(); ctx.arc(0, 0, 15.5, 0, TAU); ctx.stroke();
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
   ctx.rotate(p.a);
   if (p.spawnT > 0) { const ss = 0.3 + 0.7 * (1 - p.spawnT / 0.5); ctx.scale(ss, ss); }
   const spd = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
@@ -3972,6 +4105,20 @@ function drawTexts() {
 }
 
 /* ================= draw: hud & overlays ================= */
+/* [R15-HUD] 右上模式标签统一来源（overTitle() 同款纪律：同一标题只在一处定义）。
+   旧版是 drawHUD 里的 10 分支三元链，文字口径与特例色（graze 淡绿）混在绘制语句里没法单测。 */
+function modeTag() {
+  if (G.mode === 'graze') return ['GRAZE · 擦弹专精', 'rgba(200,255,140,.8)'];
+  if (G.mode === 'boss') return ['BOSS · 连战', null];
+  if (G.mode === 'brb') return ['RUSH · 自定义连战', null];
+  if (G.mode === 'versus') return ['VERSUS · 对决', null];
+  if (G.mode === 'ghost') return ['GHOST · 残影悬赏', null];
+  if (G.mode === 'endless') return ['WAVE · 无尽', null];
+  if (G.mode === 'chaos') return ['WAVE · 混沌 ×2', null];
+  if (G.mode === 'daily') return ['DAILY · 每日 ×2', null];
+  if (G.mode === 'duel') return ['DUEL · 种子对决 ×2', null];
+  return ['WAVE · 波次', null];
+}
 function drawHUD() {
   // [FIX-MOB1] 四边安全区内缩：桌面 SAFE 全 0，坐标与旧版一致
   const hl = 16 + SAFE.l, hr = SAFE.r, vt = SAFE.t, hb = SAFE.b;
@@ -3981,7 +4128,8 @@ function drawHUD() {
   txt(pad(Math.floor(G.dispScore), 7), hl, 46 + vt, 29, '#eaf6ff', 'left', 800, true);
   ctx.shadowBlur = 0;
   if (G.combo >= 2) {
-    txt('×' + mult + '  ' + G.combo + (G.mode === 'graze' ? ' GRAZE' : ' HIT'), hl, 74 + vt, 16, '#ffc233', 'left', 800, true);
+    // [R15-HUD] 排版统一：分隔符与 HUD 其他行同用「 · 」，字号/字重/等宽与得分块同族（mono/800）
+    txt('×' + mult + ' · ' + G.combo + (G.mode === 'graze' ? ' GRAZE' : ' HIT'), hl, 74 + vt, 16, '#ffc233', 'left', 800, true);
     ctx.globalAlpha = 0.22; ctx.fillStyle = '#ffc233';
     ctx.fillRect(hl, 84 + vt, 92, 3);
     ctx.globalAlpha = 1;
@@ -4011,14 +4159,26 @@ function drawHUD() {
     // 擦弹专精没有词条栏，这里挂总擦弹/本波擦弹计数
     txt('擦弹 ' + G.grazes + ' · 本波 ' + (G.waveGrz || 0), hl, 128 + vt, 11, 'rgba(234,255,106,.9)', 'left', 700, true);
   }
-  const wt = G.mode === 'boss' ? 'BOSS · 连战' : G.mode === 'brb' ? 'RUSH · 自定义连战' : G.mode === 'versus' ? 'VERSUS · 对决' : G.mode === 'ghost' ? 'GHOST · 残影悬赏' : G.mode === 'graze' ? 'GRAZE · 擦弹专精' : G.mode === 'endless' ? 'WAVE · 无尽' : G.mode === 'chaos' ? 'WAVE · 混沌 ×2' : G.mode === 'daily' ? 'DAILY · 每日 ×2' : G.mode === 'duel' ? 'DUEL · 种子对决 ×2' : 'WAVE · 波次';
-  txt(wt + (G.abyss ? ' · ⛩回廊' : '') + (G.coop ? ' · 双人' : ''), W - 16 - hr, 20 + vt, 11, G.abyss ? 'rgba(255,120,140,.85)' : G.mode === 'graze' ? 'rgba(200,255,140,.8)' : 'rgba(130,170,230,.75)', 'right', 600, true);
+  const [wt, wtc] = modeTag(); // [R15-HUD] 模式标签走统一来源（旧 10 分支三元链已移除）
+  txt(wt + (G.abyss ? ' · ⛩回廊' : '') + (G.coop ? ' · 双人' : ''), W - 16 - hr, 20 + vt, 11, G.abyss ? 'rgba(255,120,140,.85)' : wtc || 'rgba(130,170,230,.75)', 'right', 600, true);
   ctx.shadowColor = '#4de3ff'; ctx.shadowBlur = 14;
   const vsHP = G.mode === 'versus' || G.mode === 'ghost';
   txt(vsHP ? (G.boss ? String(Math.ceil(G.boss.hp)) : '--') : pad(G.wave, 2), W - 16 - hr, 46 + vt, vsHP ? 24 : 29, '#eaf6ff', 'right', 800, true);
   ctx.shadowBlur = 0;
   txt('HI ' + pad(G.hiscore, 7), W - 16 - hr, 68 + vt, 12, 'rgba(150,190,255,.6)', 'right', 600, true);
-  for (let i = 0; i < G.lives; i++) shipIcon(W - 22 - hr - i * 22, 92 + vt, 0.55, '#4de3ff');
+  // [R15-HUD] 生命/护盾受击瞬时反馈：顶右角落（生命+炸弹行）0.45s 红晕/青晕 + 生命图标红闪
+  const hurtK = CL(G.hudHurtT / 0.45, 0, 1), shieldK = CL(G.hudShieldT / 0.45, 0, 1);
+  if (hurtK > 0 || shieldK > 0) {
+    ctx.globalAlpha = (hurtK * 0.22 + shieldK * 0.2) * (0.65 + 0.35 * Math.sin(G.time * 26));
+    ctx.fillStyle = hurtK >= shieldK ? '#ff3355' : '#3ddfff';
+    rr(W - 136 - hr, 76 + vt, 120, 52, 9);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+  for (let i = 0; i < G.lives; i++) {
+    shipIcon(W - 22 - hr - i * 22, 92 + vt, 0.55,
+      hurtK > 0 && Math.sin(G.time * 40) > 0 ? '#ff5e6e' : '#4de3ff'); // 受击红闪（0.45s，~6Hz）
+  }
   for (let i = 0; i < G.bombs; i++) {
     const bx = W - 22 - hr - i * 22;
     ctx.globalAlpha = 0.9;
@@ -4060,8 +4220,20 @@ function drawHUD() {
     ctx.shadowBlur = 0;
     ctx.globalAlpha = 0.16; ctx.fillStyle = b.kc;
     ctx.fillRect(bx, 21, bw, 7);
+    // [R15-HUD] 血条受击瞬时反馈：① 受击白影——被打掉的血以白色残段短暂留在条上（hpGhost 缓慢收敛）
+    const bwx = bw * CL(b.hp / b.maxhp, 0, 1);
+    const ghx = bw * CL((b.hpGhost != null ? b.hpGhost : b.hp) / b.maxhp, 0, 1);
+    if (ghx > bwx + 0.5) {
+      ctx.globalAlpha = 0.45; ctx.fillStyle = '#ffffff';
+      ctx.fillRect(bx + bwx, 21, ghx - bwx, 7);
+    }
     ctx.globalAlpha = 1;
-    ctx.fillRect(bx, 21, bw * CL(b.hp / b.maxhp, 0, 1), 7);
+    ctx.fillRect(bx, 21, bwx, 7);
+    // ② 命中瞬间白闪（hitT=0.05s 内条体提亮一档）
+    if (b.hitT > 0) {
+      ctx.globalAlpha = b.hitT * 9; ctx.fillStyle = '#ffffff';
+      ctx.fillRect(bx, 21, bwx, 7);
+    }
     ctx.globalAlpha = 0.55;
     ctx.fillStyle = 'rgba(0,0,0,.55)';
     for (let si = 1; si < 4; si++) ctx.fillRect(bx + bw * si / 4 - 0.5, 21, 1, 7);
@@ -4224,7 +4396,11 @@ function drawAchPop() {
   // [ELEG8-ACHPOP] 矮视口（横屏手机 H<560）结算屏上 RANK 字母区在 H*0.545±29 ≈ 183-241，
   // 弹窗 y=142 高 54 → 底缘 196 压住 RANK 字母顶部 → 矮视口抬到 92（底缘 146，让出字母区）；
   // 桌面 RANK 在更下方（H*0.545 远大于 196），保持 142 原位。
-  const ay0 = H < 560 ? 92 : 142;
+  // [R15-FIX4] 对局态（含暂停/升级/波次闸，HUD 在场）矮视口弹窗改落 140：原 92 档正好盖住
+  // 顶右生命图标（y≈92）与炸弹图标行（y≈114）——drawAchPop 在 drawHUD 之后画，面板整块压在
+  // 图标上 3.4s。140 落在 HUD 角落（至 ~128）之下、右中带空档，横幅带（0.3H±20）不相交。
+  const inGame = G.state === 'playing' || G.state === 'paused' || G.state === 'levelup' || G.state === 'wgate';
+  const ay0 = H < 560 ? (inGame ? 140 : 92) : 142;
   ctx.save();
   ctx.globalAlpha = out;
   ctx.translate(x, ay0);
@@ -4293,7 +4469,7 @@ function drawQToast() {
   ctx.restore();
 }
 function drawReticle() {
-  if (G.touchMode || G.state !== 'playing' || !mouse.inside) return;
+  if (G.touchMode || G.state !== 'playing' || G.deadT > 0 || !mouse.inside) return;
   const kr = 1 - Math.exp(-16 * RDT);
   ret.x = LP(ret.x, mouse.x, kr);
   ret.y = LP(ret.y, mouse.y, kr);
@@ -4368,7 +4544,12 @@ function drawKillcam() {
   ctx.moveTo(dx + 8, dy - 8); ctx.lineTo(dx - 8, dy + 8);
   ctx.stroke();
   ctx.globalAlpha = fade * (0.55 + 0.4 * Math.sin(G.time * 5));
-  txt('⟲ 击杀回放 · KILLCAM', 70, H - 44, 12, '#9fdcff', 'left', 700, true);
+  // [R15-FIX1] 标签原位 H-44 会压进结算按钮带（按钮带顶 min(H-42, 0.87H+42)，H<613 档 = H-42，
+  // 文字墨身 H-51..H-37 与按钮上沿重叠 ~7px；render 里 drawKillcam 后画 → 文字直接盖在首钮上）。
+  // 按钮带已出现（G.over>0.7）就让位到带顶上方 ≥13px；桌面按钮带在 0.87H+42 时同样生效。
+  const kobs = overBtns();
+  const ky = kobs.length ? Math.min(H - 44, kobs[0].y - 13) : H - 44;
+  txt('⟲ 击杀回放 · KILLCAM', 70, ky, 12, '#9fdcff', 'left', 700, true);
   ctx.restore();
   ctx.globalAlpha = 1;
 }
@@ -4504,7 +4685,7 @@ function drawOverlay() {
       ctx.shadowBlur = 0;
       const cl = [
         ['NEON VOID · 霓虹虚空', 22, '#eaf6ff', 800],
-        ['v1.5.4 · 单文件 · 零依赖 · ~310KB', 12, 'rgba(170,200,235,.8)', 600],
+        ['v1.5.5 · 单文件 · 零依赖 · ~320KB', 12, 'rgba(170,200,235,.8)', 600],
         ['v1.0.2 修复：无尽模式高波次白屏 · 超频射控失效 · 屏幕外残敌卡波', 11, 'rgba(120,230,190,.85)', 600],
         ['v1.0.3 平衡：高波次难度曲线（数量↑ / 血量封顶）· 帧循环微调', 11, 'rgba(120,230,190,.85)', 600],
         ['v1.1.0 扩充：奇点之瞳降临 · 双螺旋/镜面折返弹幕 · 超导闪现/虚空结晶/擦弹领域', 11, 'rgba(120,230,190,.85)', 600],
@@ -4516,6 +4697,7 @@ function drawOverlay() {
         ['v1.5.2 无障碍：色盲模式（蓝橙调色板 · 弹幕形状差异化）· 触屏 44px 命中外扩 · 随机输入压力验证', 11, 'rgba(120,230,190,.85)', 600],
         ['v1.5.3 收官：设置页极矮视口让位（9 行不压返回钮）· 旧档/四码迁移矩阵 · 5 分钟 monkey 压力', 11, 'rgba(120,230,190,.85)', 600],
         ['v1.5.4 打磨：触屏 hover 白圈清零 · 小窗页眉/logo 让位 · 分享码口径补全 · 结算屏可回主界面', 11, 'rgba(120,230,190,.85)', 600],
+        ['v1.5.5 手感：擦弹预警环带+音调提示 · 死亡慢动作渐隐 · BOSS 出场演出 · 连杀播报节奏 · HUD 受击反馈 · 小窗叠印清零', 11, 'rgba(120,230,190,.85)', 600],
         ['', 10, '', 400],
         ['设计 · 代码 · 美术 · 音乐', 14, '#dfeeff', 700],
         ['全部由 AI 通过 VIBECODING 创作', 14, '#ff7ad9', 700],
@@ -4751,7 +4933,7 @@ function drawOverlay() {
     if (G.tStage === 'players') {
       // [FIX-COS9] 844×390 等矮视口：H*0.70 的 P1/P2 提示行与「ESC · 返回上一步」按钮重叠（预存在）。
       // 提示块改为从「返回/召唤按钮底边 + 10」起画（不高于 H*0.70），矮视口整体让位，桌面几何不变。
-      const py0 = Math.max(H * 0.70, H * 0.525 + 42 + 12 + 26 + 10);
+      const py0 = playersHintY(); // [R15-LAY1] 公式收口到 playersHintY()（榜块让位判定同源）
       if (G.tSel === 'versus') {
         txt('P1  WASD + 鼠标 · 击败 BOSS · 3 条命', cx, py0, 12.5, 'rgba(160,195,235,.85)', 'center', 500);
         txt('P2  方向键驾驶 BOSS · 数字键 1-9/0 释放招式', cx, py0 + 19, 12.5, 'rgba(255,140,190,.85)', 'center', 500);
@@ -4770,8 +4952,12 @@ function drawOverlay() {
     // [ELEG8-GATE] brb/duel/duelres/ghost 四个整页自绘子页也不画：这些子页底部有自己的动作按钮带
     // （构建器 H*0.49+86 起、对决构建器 H*0.80、残影 H*0.425+64+行高），榜块（H*0.80 起 +51px）
     // 与按钮同带重叠、且榜块本就不属于子页信息——整页 UI 一律让位不画。
+    // [R15-LAY1] mode 页按 modeHonFit()（与模式卡几何同源）让位；players 页榜块顶不得压
+    // P1/P2 提示块末行（同 H≈432 档实测：提示末行墨下缘 360.6 > 榜顶 339.6）。
     if (G.tStage !== 'ach' && G.tStage !== 'brb' && G.tStage !== 'duel' && G.tStage !== 'duelres' &&
-        G.tStage !== 'ghost' && H > 430 && !(G.tStage === 'set' && !setGeom().honFit)) {
+        G.tStage !== 'ghost' && H > 430 && !(G.tStage === 'set' && !setGeom().honFit) &&
+        !(G.tStage === 'mode' && !modeHonFit()) &&
+        !(G.tStage === 'players' && H * 0.80 - 6 < playersHintY() + 38 + 10)) {
       if (G.tSel === 'daily' && G.daily && G.daily.rows.length) {
         txt('── 每日挑战 · 今日排行 · ' + G.daily.date + ' ──', cx, H * 0.80, 10.5, 'rgba(120,230,180,.6)', 'center', 600);
         const dn2 = Math.min(3, G.daily.rows.length);
@@ -4801,7 +4987,7 @@ function drawOverlay() {
     // 页脚基线在 H-14 直接从按钮下穿过 → 这些自绘子页一律让位不画页脚（各自已有返回按钮/页内提示）
     if (G.tStage !== 'brb' && G.tStage !== 'ach' && G.tStage !== 'set' && G.tStage !== 'guide' &&
         G.tStage !== 'credits' && G.tStage !== 'ghost' && G.tStage !== 'duel' && G.tStage !== 'duelres') {
-      txt('P 暂停 · M 静音 · A 成就 · G 指南 · S 设置 · C 关于 · B 构建器 · NEON VOID v1.5.4', cx, H - 14, 10, 'rgba(140,170,210,.4)', 'center', 500, true);
+      txt('P 暂停 · M 静音 · A 成就 · G 指南 · S 设置 · C 关于 · B 构建器 · NEON VOID v1.5.5', cx, H - 14, 10, 'rgba(140,170,210,.4)', 'center', 500, true);
     }
   } else if (G.state === 'levelup') {
     ctx.fillStyle = 'rgba(3,5,16,.8)';
@@ -5024,16 +5210,30 @@ function drawOverlay() {
       rows.splice(3, 0, ['对决种子', duelSeedText(G.duelRun.seed)], ['波次上限', G.duelRun.cap + ' 波' + (G.won ? ' · 已打满' : '')]);
     }
     let ry = compact ? Math.max(H * 0.34, spBottom + 12) : Math.max(H * 0.40, spBottom + 12);
-    const rowH = compact ? Math.max(15, Math.min(19, (btnY - 96 - ry) / rows.length)) : 24;
+    // [R15-LAY2] 极矮视口多行战绩（对决 9 行 / 通关·擦弹·残影 8 行）单列 15px 行距下限必然溢出
+    // （480×320 canvas H≈288 实测：rowEnd 252.4 > 按钮带顶 246，CTA/键盘提示行被顶进战绩行——
+    // R14 遗留复现）→ 单列下限的行末越过「底部栈全预算」（btnY-55：CTA+提示行的保留带）才切
+    // 双列网格（行距减半，列内标签左对齐/数值右对齐同口径）；单列放得下的档位一律维持旧几何。
+    const singleFits = ry + rows.length * 15 <= btnY - 55;
+    const col2 = compact && !singleFits;
+    const rows2 = col2 ? Math.ceil(rows.length / 2) : rows.length;
+    const rowH = compact ? Math.max(15, Math.min(19, (btnY - 96 - ry) / rows2)) : 24;
     rows.forEach((rw, i) => {
       const ra = CL((G.over - 0.9 - i * 0.08) / 0.25, 0, 1);
       if (ra > 0) {
         ctx.globalAlpha = fa * ra;
-        txt(rw[0], cx - 150, ry, compact ? 12.5 : 14, 'rgba(150,180,220,.85)', 'left', 500);
-        txt(rw[1], cx + 150, ry, compact ? 14 : 15, '#eaf6ff', 'right', 700, true);
+        if (col2) {
+          const col = i % 2, row2 = (i - col) / 2, ry2 = ry + row2 * rowH;
+          txt(rw[0], col === 0 ? cx - 160 : cx + 8, ry2, 12.5, 'rgba(150,180,220,.85)', 'left', 500);
+          txt(rw[1], col === 0 ? cx - 8 : cx + 160, ry2, 14, '#eaf6ff', 'right', 700, true);
+        } else {
+          txt(rw[0], cx - 150, ry, compact ? 12.5 : 14, 'rgba(150,180,220,.85)', 'left', 500);
+          txt(rw[1], cx + 150, ry, compact ? 14 : 15, '#eaf6ff', 'right', 700, true);
+        }
       }
-      ry += rowH;
+      if (!col2) ry += rowH;
     });
+    if (col2) ry += rows2 * rowH;
     const rowEnd = ry;
     ctx.globalAlpha = fa;
     const p2 = 0.5 + 0.5 * Math.sin(G.time * 3);
@@ -5067,11 +5267,21 @@ function drawOverlay() {
       hintDrawn = true;
     }
     const ctaY = compact ? Math.min(hintDrawn ? hintY + 24 : Math.min(H * 0.87, rowEnd + 30), btnY - 31) : H * 0.87;
-    txt('点击 或 按 R 重新出击 · PRESS R TO RETRY', cx, ctaY, compact ? 13 : 15, 'rgba(255,255,255,' + (0.45 + 0.55 * p2) + ')', 'center', 700);
+    // [R15-LAY2] CTA 让位：带顶钳制（btnY-31）可能把 CTA 拉回战绩行墨内（480×320 单列 7 行
+    // rowEnd 222.4 > 钳制值 215 实测）→ CTA 下探到战绩行末之下 ≥8px；提示行已让位时钳制值
+    // 放宽到 btnY-16（CTA 独占与按钮带之间的空档），终端保险 btnY-18 防极端视口压钮。
+    // 桌面（H≥560）几何不变。
+    const ctaDrawY = compact
+      ? Math.min(btnY - 18, Math.max(rowEnd + 8, Math.min(ctaY, btnY - (hintRowFits(ctaY + 24, btnY, rowEnd) ? 31 : 16))))
+      : ctaY;
+    txt('点击 或 按 R 重新出击 · PRESS R TO RETRY', cx, ctaDrawY, compact ? 13 : 15, 'rgba(255,255,255,' + (0.45 + 0.55 * p2) + ')', 'center', 700);
     // [FIX-COS12→13] 提示行随 CTA 走：ctaY 已受 btnY-31 钳制 → 提示行自然落在带顶上方 ≥7px，
     // 与 CTA 中心距恒 24px（不再需要独立钳制，也不会再出现 1px 叠印）。
-    const hintRowY = ctaY + 24;
-    txt('按 C 复制战报 · 按 T 返回主界面', cx, hintRowY, 12, 'rgba(150,190,240,.75)', 'center', 600);
+    // [R15-LAY2] 极矮视口键盘提示行让位：与战绩行末或按钮带贴上（净空 <6px）就整行不画
+    // （C/T 动作仍在按钮带「复制战报 · C」「⌂ 主界面 · T」，信息不丢）。
+    const hintRowY = ctaDrawY + 24;
+    const hintRowShow = !compact || hintRowFits(hintRowY, btnY, rowEnd);
+    if (hintRowShow) txt('按 C 复制战报 · 按 T 返回主界面', cx, hintRowY, 12, 'rgba(150,190,240,.75)', 'center', 600);
     // 结算操作按钮（悬赏码 / 海报 / 战报）
     for (const ob of overBtns()) {
       const hov = mouse.inside && mouse.x >= ob.x && mouse.x <= ob.x + ob.w && mouse.y >= ob.y && mouse.y <= ob.y + ob.h; // [FIX-HOV1] 同上
@@ -5170,6 +5380,10 @@ function render() {
   }
   drawOverlay();
   drawKillcam();
+  if (G.deadT > 0) { // [R15-DEATH] 渐隐：演出窗内画面线性压暗（0→0.55），与慢镜头一起把视线交给结算屏
+    ctx.fillStyle = 'rgba(2,3,10,' + (0.55 * CL((0.34 - G.deadT) / 0.34, 0, 1)).toFixed(3) + ')';
+    ctx.fillRect(0, 0, W, H);
+  }
   if (G.fade > 0.005) {
     ctx.fillStyle = 'rgba(2,3,10,' + CL(G.fade, 0, 1) + ')';
     ctx.fillRect(0, 0, W, H);
@@ -5275,6 +5489,25 @@ function setGeom() {
     if (deficit > 0) y0 = Math.max(hdrY + 30, y0 - deficit - 2);
   }
   return { compact, crowd, hdrY, h, y0, pitch, honFit };
+}
+/* [R15-LAY1] mode/players 页榜块让位（R14 遗留实测复现：720×520 小窗 canvas H≈432，
+   压缩后模式卡第 4 行底边 ≈386.6 压住 H*0.80≈345.6 起画的荣誉榜标题与行块）。
+   与 titleBtns 的模式卡几何同源判定：榜块带 [H*0.80-6, 底行墨下缘] 必须整体落在
+   卡底之下、页脚基线（H-14）之上；放不下整块不画——荣誉榜在成就页/结算屏仍可达，信息不丢。 */
+function modeHonFit() {
+  const rows = Math.ceil(MODES.length / 2);
+  const y0 = H * 0.455;
+  const avail = H * 0.90 - SAFE.b - y0;
+  let bh = 48, gap = 8;
+  if (rows * (bh + gap) - gap > avail) { gap = 6; bh = Math.max(30, Math.floor((avail - (rows - 1) * gap) / rows)); }
+  const cardsEnd = y0 + rows * (bh + gap) - gap;
+  if (H * 0.80 - 6 < cardsEnd + 4) return false;
+  // 3 行榜块 +19px 行距（每日榜 +dstat 摘要行 +20）：底行墨下缘不得贴住页脚基线 H-14
+  const honBottom = H * 0.80 + 51 + (G.tSel === 'daily' && G.dstat && (G.dstat.best.s > 0 || G.dstat.streak > 0) ? 20 : 0) + 6;
+  return honBottom <= H - 24;
+}
+function playersHintY() { // P1/P2 提示块首行 y（渲染侧与榜块让位判定共用同一公式，防两处漂移）
+  return Math.max(H * 0.70, H * 0.525 + 42 + 12 + 26 + 10);
 }
 function titleBtns() {
   if (G.tStage === 'ghost') {
@@ -5557,11 +5790,13 @@ function handleKey(code) {
   }
   if (code === 'Escape' && G.state === 'title' && G.tStage !== 'mode') { titleAct('back'); return; }
   if (code === 'KeyP' || code === 'Escape') {
-    if (G.state === 'playing') setPause(true);
+    // [R15-FIX2] 死亡演出窗（deadT>0）禁暂停：演出期间暂停会让 deadT 照常倒计时归零、
+    // gameOver 被 state!=='playing' 门跳过 → 复活成 9s 无敌幽灵且结算链路整段丢失
+    if (G.state === 'playing' && G.deadT <= 0) setPause(true);
     else if (G.state === 'paused') setPause(false);
     return;
   }
-  if (code === 'Space' && G.state === 'playing') { useBomb(); return; }
+  if (code === 'Space' && G.state === 'playing' && G.deadT <= 0) { useBomb(); return; } // [R15-FIX2] 同上：本体已爆不再消费炸弹
   if (code === 'KeyQ') { castRift(); return; }
   if (code === 'KeyE') { castOD(); return; }
   if (code === 'KeyX') { castUltra(); return; }
@@ -5739,6 +5974,7 @@ cv.addEventListener('pointerdown', (e) => {
       return;
     }
     for (const b of touchBtns()) {
+      if (G.deadT > 0) return; // [R15-FIX2] 死亡演出窗：本体已爆，虚拟技能/炸弹键全部停用
       if (D2(px, py, b.x, b.y) < b.r * b.r * 1.7) {
         if (b.k === 'dash') tryDash();
         else if (b.k === 'bomb') useBomb();
@@ -5847,6 +6083,14 @@ function frame(now) {
   if (G.banner) { G.banner.t += RDT; if (G.banner.t >= G.banner.d) G.banner = null; }
   if (G.achPop) { G.achPop.t += RDT; if (G.achPop.t > 3.4) G.achPop = null; }
   if (G.state === 'over') G.over += RDT;
+  // [R15-DEATH] 死亡演出倒计时（真实时间）：归零时还在 playing 才进正式结算——演出窗内
+  // 若残弹打出 finishBoss→winGame 抢先翻 state，则尊重胜局不再覆盖
+  if (G.deadT > 0) {
+    G.deadT -= RDT;
+    if (G.deadT <= 0) { G.deadT = 0; if (G.state === 'playing') gameOver(); }
+  }
+  if (G.hudHurtT > 0) G.hudHurtT -= RDT; // [R15-HUD] HUD 受击反馈窗（真实时间衰减）
+  if (G.hudShieldT > 0) G.hudShieldT -= RDT;
   if (G.state === 'over' && G.over > 3 && G.dispScore !== G.score) G.dispScore = G.score;
   if (G.state === 'levelup') G.cardT += RDT;
   G.time += RDT;
@@ -5861,7 +6105,10 @@ function frame(now) {
     if (G.state === 'playing') update(RDT * G.slow);
     else if (G.state !== 'paused' && G.state !== 'levelup') updateAmbient(RDT);
     else decay(RDT); // [FIX-5] 暂停/升级时不更新世界，但闪光等特效必须继续衰减
-    if (G.state === 'playing' && G.pending > 0) {
+    // [R15-FIX3] 死亡演出窗内捡到经验不再弹升级三选一：levelup 翻态会让 deadT 归零时
+    // gameOver 被 state!=='playing' 门跳过（同 [R15-FIX2] 的复活幽灵），且选卡 UI 压在
+    // 尸体渐隐上观感崩坏。pending 留到窗后：对局已死则随 startGame 复位自然丢弃。
+    if (G.state === 'playing' && G.pending > 0 && G.deadT <= 0) {
       G.state = 'levelup';
       rollCards();
       sfxLevel();
@@ -5876,7 +6123,7 @@ function frame(now) {
     try { localStorage.setItem('nv_lasterr', String(e && e.message || e)); } catch (e2) {}
     G.flash = Math.max(0, G.flash - 0.15);
     G.shake = 0; G.chroma *= 0.85;
-    G.hitstop = 0; G.slow = 1; G.slowT = 0; G.sgT = 0; G.thornQ = null;
+    G.hitstop = 0; G.slow = 1; G.slowT = 0; G.sgT = 0; G.thornQ = null; G.deadT = 0; G.hudHurtT = 0; G.hudShieldT = 0;
     // [FIX-6] 先复位画布状态，否则 'lighter' 残留会让画布逐帧累加成纯白
     try {
       ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
@@ -5891,7 +6138,7 @@ function frame(now) {
       enemies.length = 0; ebullets.length = 0; mines.length = 0; marks.length = 0; G.boss = null; G.banner = null;
       bullets.length = 0; parts.length = 0; ghosts.length = 0; orbs.length = 0; texts.length = 0; // [FIX-6] 脏对象一并清掉
       pickups.length = 0; G.endSnap = null; // [FIX-LOOP2] 审计补漏：清场清单补 pickups 与滞留的结算快照
-      banner('已自动恢复', 'AUTO RECOVERED · 战场已重置，继续战斗');
+      banner('已自动恢复', 'AUTO RECOVERED · 战场已重置，继续战斗', '#4de3ff', false, 2);
     }
     if (G.errStreak > 60) {
       // [FIX-LOOP2] 连续 60 帧异常→回标题；若连回标题都救不回来（render 持续因非实体状态抛错，
@@ -5959,9 +6206,10 @@ setInterval(() => {
   orbs.length = 0; texts.length = 0; marks.length = 0; mines.length = 0; pickups.length = 0;
   G.boss = null; G.banner = null; G.endSnap = null; autopsyCache = null;
   G.hitstop = 0; G.slow = 1; G.slowT = 0; G.sgT = 0; G.thornQ = null;
+  G.deadT = 0; G.hudHurtT = 0; G.hudShieldT = 0; // [R15-DEATH] 看门狗恢复同清演出窗
   G.flash = 0; G.chroma = 0; G.shake = 0;
   G.errStreak = 0; healTries = 0; healSkip = 0;
-  if (G.state === 'playing') banner('画面已自动恢复', 'WATCHDOG RECOVER · 荣誉榜与进度不受影响', '#3dff9e', true);
+  if (G.state === 'playing') banner('画面已自动恢复', 'WATCHDOG RECOVER · 荣誉榜与进度不受影响', '#3dff9e', true, 2);
   try { render(); } catch (e) {}
 }, 1500);
 // 残影悬赏：带 #bounty=<码> 打开页面 → 解析并注入残影 BOSS 战（击杀链沿用码内深度）
@@ -6005,7 +6253,12 @@ window.NV_SNAP = () => ({
   queue: G.waveQueue.slice(), marks: marks.map(m => [m.k, Math.round(m.x), Math.round(m.y)]),
   cards: (G.cards || []).map(c => c.u.k),
   pp: [Math.round(player.x), Math.round(player.y)],
-  boss: G.boss ? [G.boss.ki, G.boss.st, G.boss.hp, G.boss.maxhp, Math.round(G.boss.x), Math.round(G.boss.y)] : null,
+  // [R15-GRAZE][R15-DEATH] 断言面：gz=擦弹预警逼近度（0..1 平滑值）· gzRaw=同帧原始检测值
+  // （波次闸冻结 update 时平滑值会滞留，原始值按帧取 max 断言）· deadT=死亡演出窗剩余秒（>0 即演出中）
+  gz: Math.round((player.gzV || 0) * 100) / 100,
+  gzRaw: Math.round((player.gz || 0) * 100) / 100,
+  deadT: G.deadT > 0 ? Math.round(G.deadT * 1000) / 1000 : 0,
+  boss: G.boss ? [G.boss.ki, G.boss.st, G.boss.hp, G.boss.maxhp, Math.round(G.boss.x), Math.round(G.boss.y), Math.round(G.boss.hpGhost != null ? G.boss.hpGhost : G.boss.hp)] : null,
   dailyRank: G.dailyRank, dstat: G.dstat ? { streak: G.dstat.streak, best: G.dstat.best.s, mcombo: G.dstat.mcombo } : null,
   ach: G.ach.slice(), qToast: G.qToast ? G.qToast.msg : null, errStreak: G.errStreak,
   duelRun: G.duelRun ? { seed: G.duelRun.seed, cap: G.duelRun.cap, lv: G.duelRun.lv.slice() } : null,
@@ -6044,6 +6297,7 @@ window.NV_CHEAT = {
   lowNow: () => { G.tLow = 10.01; G.tHigh = 0; }, // 直接满足降档持时（跳过 10s 等待）
   highNow: () => { G.tHigh = 20.01; G.tLow = 0; }, // 直接满足回升持时
   kill: () => { G.lives = 1; hurtShip(player); }, // 测试专用速死走 recordScore（验证 dstat/成就/结算链路）
+  combo: n => { G.combo = n; G.comboT = 0.01; }, // [R15-RHYTHM] 测试专用：置连击立即超时（连杀中断播报断言用）
   hp1: () => { if (G.boss) G.boss.hp = 1; },     // 测试专用：残影/连战 BOSS 血量置 1（走真实受击死亡→winGame 路径）
   pk: k => { // 测试专用：投放到离敌我实体最远的候选点的拾取物（色盲拾取调色板断言用）
     const spots = [[W / 2, H * 0.25], [W * 0.2, H * 0.25], [W * 0.8, H * 0.25], [W * 0.35, H * 0.25], [W * 0.65, H * 0.25]];
@@ -6067,6 +6321,20 @@ window.NV_CHEAT = {
     return [best[0], best[1]];
   },
   bshot: () => { ebBoss = 1; eb(60, 80, 0, 300, 5, '#ff5577'); ebBoss = 0; }, // 测试专用：自左上向右匀速 BOSS 弹（bd=1 绘制路径断言用，拖尾线保证取色样本量）
+  gshot: () => { // 测试专用：[R15-GRAZE] 静止杂兵弹放在擦弹预警环带内（1.32×grazeR，不触发擦弹）——
+    // 预警环带逼近度断言用。8 向候选里挑钳制进画布后离飞船最远者（船贴边时不钳进擦弹圈）。
+    const gr = G.grazeR || 32, d = gr * 1.32;
+    let best = null, bd2 = -1;
+    for (let i = 0; i < 8; i++) {
+      const a = i / 8 * TAU;
+      const x = CL(player.x + Math.cos(a) * d, 24, W - 24);
+      const y = CL(player.y + Math.sin(a) * d, 24, H - 24);
+      const dd = D2(x, y, player.x, player.y);
+      if (dd > bd2) { bd2 = dd; best = [x, y]; }
+    }
+    eb(best[0], best[1], 0, 0, 5, '#ff5577');
+    return [Math.round(best[0]), Math.round(best[1])];
+  },
   tier: () => G.tier
 };
 })();
