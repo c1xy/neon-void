@@ -1,0 +1,112 @@
+{
+ "env": {
+  "node": "v24.16.0",
+  "viewport": "844x390",
+  "dpr": 1,
+  "date": "2026-11-16T16:06:38.520Z"
+ },
+ "boot": [
+  {
+   "form": "classic",
+   "ready": "playing",
+   "snapMs": 338,
+   "bootMs": 451
+  },
+  {
+   "form": "endless",
+   "ready": "playing",
+   "snapMs": 343,
+   "bootMs": 383
+  },
+  {
+   "form": "boss",
+   "ready": "playing",
+   "snapMs": 335,
+   "bootMs": 460
+  },
+  {
+   "form": "chaos",
+   "ready": "playing",
+   "snapMs": 345,
+   "bootMs": 461
+  },
+  {
+   "form": "daily",
+   "ready": "playing",
+   "snapMs": 326,
+   "bootMs": 439
+  },
+  {
+   "form": "versus",
+   "ready": "playing",
+   "snapMs": 340,
+   "bootMs": 448
+  },
+  {
+   "form": "graze",
+   "ready": "playing",
+   "snapMs": 341,
+   "bootMs": 451
+  },
+  {
+   "form": "ghost",
+   "ready": "ghost",
+   "snapMs": 294,
+   "bootMs": 301
+  },
+  {
+   "form": "brb",
+   "ready": "brb",
+   "snapMs": 350,
+   "bootMs": 406
+  },
+  {
+   "form": "duel",
+   "ready": "duel",
+   "snapMs": 330,
+   "bootMs": 425
+  },
+  {
+   "form": "duelres",
+   "ready": "duelres",
+   "snapMs": 308,
+   "bootMs": 313
+  }
+ ],
+ "heap": {
+  "startMB": 3.41,
+  "endGCMB": 3.74,
+  "growthMB": 0.33,
+  "samples": [
+   {
+    "t": 0,
+    "mb": 3.41
+   },
+   {
+    "t": 5,
+    "mb": 3.87
+   },
+   {
+    "t": 10,
+    "mb": 3.56
+   },
+   {
+    "t": 15,
+    "mb": 3.39
+   },
+   {
+    "t": 20,
+    "mb": 3.9
+   },
+   {
+    "t": 25,
+    "mb": 3.46
+   },
+   {
+    "t": 30,
+    "mb": 3.93
+   }
+  ]
+ },
+ "swOfflineMs": 42
+}

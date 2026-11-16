@@ -6,7 +6,8 @@
    种子对决全链路（构建→码→开局→成绩码→对决史）、昨日之影采样与回放、
    ghost/brb 胜局实机（NV_CHEAT.hp1 辅助钩子，走真实受击死亡→winGame 路径）、
    色盲模式取色断言、触屏 44px、设置页开关语义往返与几何、对决构建页亮像素剖面、
-   [R13-MIGRATE] 存档迁移实机（旧档一包 + v1 悬赏码）、性能基线（boot/heap/SW 离线）、
+   [R15-FEEL] 手感层回归（擦弹预警环带/死亡演出窗/BOSS 出场与血条白影/连杀中断播报）、
+   [R15-CB×FPS] 色盲×画质降档组合矩阵、[R13-MIGRATE] 存档迁移实机（旧档一包 + v1 悬赏码）、性能基线（boot/heap/SW 离线）、
    [R13-MONKEY] 5 分钟随机输入 + 间歇 resize/visibility 切换（零 pageerror）。
    截图输出：环境变量 NV_E2E_SHOTS 指定的目录（缺省 = 系统临时目录下的 neon-void-e2e-shots）。
    运行：node tests/e2e.test.js */
@@ -1210,6 +1211,182 @@ async function backToTitle(b, ms) {
     const lbRaw = JSON.parse(await b.page.evaluate('localStorage.getItem("neonvoid_lb")'));
     assert.ok(lbRaw.length >= 2 && lbRaw.every(r => typeof r.m === 'string' && typeof r.c === 'number'), 'lb 旧行（缺 m/c）已迁移补全');
     assert.deep(b.errors, [], '全程零异常');
+    await b.ctx.close();
+  });
+
+  /* ================= [R15] 手感层 + 色盲×FPS 组合矩阵 ================= */
+  /* 擦弹环带采样器：gshot 布弹后逐帧（rAF）累计 max(gzRaw/gz/金环覆盖)，遇波次闸（state!=playing
+     会冻结 update → 平滑值滞留）即止——原始检测值按帧取 max，规避波次清屏时序竞态（full suite 实测复现）。
+     金环判定排除任一在场弹幕（ebS）/拾取物（picks）16px 邻域（色盲板杂兵弹同为橙金系，不能让它顶替环带），
+     再按 8 象限计覆盖：虚线环带+4 刻度块跨全部象限，单发弹簇最多占 1-2 象限，无法伪造环带。 */
+  const grazeBandProbe = (page) => page.evaluate(() => new Promise(res => {
+    window.NV_CHEAT.gshot();
+    let maxRaw = 0, maxGz = 0, maxGold = 0, maxOct = 0, n = 0;
+    const goldScan = () => {
+      const cv = document.getElementById('nv-canvas');
+      const d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
+      const s = window.NV_SNAP();
+      const W = cv.width;
+      const near = (x, y, arr, r2) => arr.some(p => { const dx = p[0] - x, dy = p[1] - y; return dx * dx + dy * dy < r2; });
+      const ebs = s.ebS.map(b => [b[2], b[3]]);
+      const pks = s.picks.map(p => [p[1], p[2]]);
+      const oct = new Array(8).fill(0);
+      let n2 = 0;
+      for (let dy = -52; dy <= 52; dy++) for (let dx = -52; dx <= 52; dx++) {
+        const x = Math.round(s.pp[0] + dx), y = Math.round(s.pp[1] + dy);
+        if (x < 0 || y < 0 || x >= W || y >= cv.height) continue;
+        const dd = dx * dx + dy * dy;
+        if (dd < 100 || dd > 2704) continue;
+        if (near(x, y, ebs, 256) || near(x, y, pks, 256)) continue; // 16px 邻域内是弹/拾取物，不算环带
+        const i = (y * W + x) * 4;
+        // 低 alpha（~0.37）叠加暗底后金带 ≈ (100,91,37)：g-b 显著、r 不低于 g
+        if (d[i + 1] > d[i + 2] + 25 && d[i] > 70 && d[i] >= d[i + 1] - 15) {
+          n2++;
+          oct[((Math.atan2(dy, dx) / (Math.PI / 4) + 8) | 0) % 8] += 1;
+        }
+      }
+      return { n: n2, oct: oct.filter(c => c >= 2).length };
+    };
+    const tick = () => {
+      const s = window.NV_SNAP();
+      maxRaw = Math.max(maxRaw, s.gzRaw || 0);
+      maxGz = Math.max(maxGz, s.gz);
+      const g = goldScan();
+      maxGold = Math.max(maxGold, g.n);
+      maxOct = Math.max(maxOct, g.oct);
+      n++;
+      if ((maxGold >= 25 && maxOct >= 5 && maxRaw >= 0.5) || n >= 45 || s.state !== 'playing') res({ maxRaw, maxGz, maxGold, maxOct, n, state: s.state });
+      else requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }));
+  s.test('手感层回归：擦弹预警环带（默认/色盲金带）· 死亡演出窗（deadT + 窗内禁暂停）· BOSS 出场镜头与血条受击白影 · 连杀中断播报', async () => {
+    // ① 擦弹预警环带（默认板）：gshot 静止弹落 1.32×grazeR → gz 逼近度上行（不触发擦弹）
+    const b0 = await boot(browser, base);
+    await startModeByKey(b0.page, '7'); // 擦弹专精
+    await b0.page.waitForTimeout(2800); // 开波横幅退场
+    const g0 = await grazeBandProbe(b0.page);
+    assert.ok(g0.maxRaw > 0.5 || g0.maxGz > 0.3,
+      '擦弹预警逼近度上行（gshot 弹在环带内）: gzRaw=' + g0.maxRaw + ' gz=' + g0.maxGz + ' @ ' + g0.n + ' 帧(state=' + g0.state + ')');
+    assert.deep(b0.errors, [], '无未捕获异常');
+    await b0.ctx.close();
+    // ② 色盲板环带：CBPAL.graze 金黄（#ffe233）→ 玩家环带内金色像素在位（黄-蓝轴全色觉可读）
+    const b1 = await boot(browser, base, { ls: { neonvoid_cfg: JSON.stringify({ cb: 1 }) } });
+    await startModeByKey(b1.page, '7');
+    await b1.page.waitForTimeout(2800);
+    const g1 = await grazeBandProbe(b1.page);
+    assert.ok(g1.maxGold >= 25 && g1.maxOct >= 5,
+      '色盲模式预警环带 = 金色像素环（排除在场弹/拾取物邻域 + 8 象限覆盖 ≥5）: goldPx=' + g1.maxGold + ' oct=' + g1.maxOct + ' @ ' + g1.n + ' 帧(state=' + g1.state + ')');
+    assert.deep(b1.errors, [], '无未捕获异常');
+    await b1.ctx.close();
+    // ③ 死亡演出窗：kill() → deadT>0（慢动作渐隐窗）→ 窗内按 P 被忽略 → 正常进结算（[R15-FIX2]）
+    const b2 = await boot(browser, base);
+    await startModeByKey(b2.page, '1');
+    await b2.page.waitForTimeout(2500);
+    await b2.page.evaluate('window.NV_CHEAT.kill()');
+    let seenDead = 0;
+    for (let i = 0; i < 10; i++) {
+      const s = await b2.snap();
+      if (s.deadT > 0) { seenDead = s.deadT; break; }
+      await b2.page.waitForTimeout(30);
+    }
+    assert.ok(seenDead > 0, '死亡演出窗可见（NV_SNAP.deadT>0）: deadT=' + seenDead);
+    await b2.page.keyboard.press('KeyP'); // 演出窗内按暂停 → 必须被忽略
+    await b2.page.waitForTimeout(700);
+    const st2 = await b2.snap();
+    assert.eq(st2.state, 'over', '演出窗内按 P 被忽略 → 正常进入结算');
+    assert.eq(st2.deadT, 0, '演出窗归零');
+    assert.deep(b2.errors, [], '无未捕获异常');
+    await b2.ctx.close();
+    // ④ BOSS 出场演出：st=enter（光柱/条纹入场镜头）→ idle 切换；血条受击白影 hpGhost>hp
+    const b3 = await boot(browser, base);
+    await startModeByKey(b3.page, '3');
+    let entered = false, exited = false;
+    const t0 = Date.now();
+    while (Date.now() - t0 < 20000 && !exited) {
+      const s = await b3.snap();
+      if (s.boss && s.boss[1] === 'enter') entered = true;
+      else if (s.boss && entered && s.boss[1] !== 'enter') exited = true;
+      await b3.page.waitForTimeout(60);
+    }
+    assert.ok(entered && exited, 'BOSS 入场镜头（st=enter）→ 战斗态切换（落位冲击）');
+    const geo = await b3.page.evaluate(() => { const r = document.getElementById('nv-canvas').getBoundingClientRect(); return { ox: r.left, oy: r.top }; });
+    const sb = await b3.snap();
+    if (sb.boss) await b3.page.mouse.move(geo.ox + sb.boss[4], geo.oy + sb.boss[5]); // 准星压 BOSS → 自动开火命中
+    const ghostSeen = await b3.page.evaluate(() => new Promise(res => {
+      const seq = [];
+      const tick = () => {
+        const s = window.NV_SNAP();
+        if (s.boss) seq.push([s.boss[2], s.boss[6]]);
+        const hit = seq.find(x => x[1] > x[0]);
+        if (hit || seq.length >= 220) res({ hit: hit || null, n: seq.length });
+        else requestAnimationFrame(tick);
+      };
+      tick();
+    }));
+    assert.ok(ghostSeen.hit && ghostSeen.hit[1] > ghostSeen.hit[0],
+      'BOSS 血条受击白影（hpGhost>hp，rAF 逐帧采样）: gap=' + (ghostSeen.hit ? ghostSeen.hit[1] - ghostSeen.hit[0] : '未捕获') + ' @ ' + ghostSeen.n + ' 帧');
+    assert.deep(b3.errors, [], '无未捕获异常');
+    await b3.ctx.close();
+    // ⑤ 连杀中断播报：combo(14) 超时 → 顶部播报；combo(5) 不播报（[R15-RHYTHM] 阈值 12）
+    const b4 = await boot(browser, base);
+    await startModeByKey(b4.page, '1');
+    await b4.page.waitForTimeout(2500);
+    await b4.page.evaluate('window.NV_CHEAT.combo(14)');
+    await b4.page.waitForTimeout(300);
+    const s4 = await b4.snap();
+    assert.ok(s4.qToast && s4.qToast.indexOf('连击中断') >= 0, '连击≥12 超时中断 → 顶部播报: ' + s4.qToast);
+    await b4.page.waitForTimeout(2800); // 上一条 toast 退场（2.6s 自灭）
+    await b4.page.evaluate('window.NV_CHEAT.combo(5)');
+    await b4.page.waitForTimeout(300);
+    const s5 = await b4.snap();
+    assert.ok(!(s5.qToast && s5.qToast.indexOf('连击中断') >= 0), '低连击（<12）中断不播报');
+    assert.deep(b4.errors, [], '无未捕获异常');
+    await b4.ctx.close();
+  });
+  s.test('色盲模式 × FPS 降级组合矩阵：cb=1 下 L0→L1→L2→回升全链路（治理器 + 弹幕上限 + 色盲橙弹像素逐档核验）', async () => {
+    // 治理器迁移钩子成对重发（同画质三档用例），色盲像素断言逐档重采——色盲换板与降档治理互不干扰
+    const b = await boot(browser, base, { ls: { neonvoid_cfg: JSON.stringify({ cb: 1 }) } });
+    await startModeByKey(b.page, '7'); // 擦弹专精：第 1 波即出杂兵弹
+    await b.page.waitForFunction('window.NV_SNAP().ebN > 0', null, { timeout: 25000 });
+    const LOW = 'window.NV_CHEAT.fps(30); window.NV_CHEAT.lowNow()';
+    const HIGH = 'window.NV_CHEAT.fps(60); window.NV_CHEAT.highNow()';
+    // 逐档像素断言：静止杂兵弹外环 = 色盲橙（#ffa02e 系；ELEG8 换板不随画质档位漂移）
+    const cbOrangeAtTier = async (tag) => {
+      for (let i = 0; i < 3; i++) {
+        await b.page.evaluate('window.NV_CHEAT.shot()');
+        await b.page.waitForTimeout(300);
+        const pr = await probeEB(b.page);
+        const mob = pr.slice().sort((x, y) => (y.fam.cbOrange + y.fam.orange) - (x.fam.cbOrange + x.fam.orange))[0];
+        if (mob && (mob.best === 'cbOrange' || mob.best === 'orange') && mob.fam.cbOrange + mob.fam.orange >= 30 && mob.fam.pink <= 2) return mob;
+      }
+      return null;
+    };
+    let sn = await b.snap();
+    assert.eq(sn.cfgCb, 1, '色盲开关读入');
+    assert.eq(sn.tier, 0, '起点 L0（自动档）');
+    let mob = await cbOrangeAtTier('L0');
+    assert.ok(mob, 'L0 色盲杂兵弹 = 橙像素（' + (mob ? JSON.stringify(mob.fam) : '未采样') + '）');
+    await waitTier(b, 1, LOW);
+    sn = await b.snap();
+    assert.eq(sn.ebCap, 400, 'L1 弹幕上限 400');
+    assert.ok(sn.qToast && sn.qToast.indexOf('画质降档 · L1') >= 0, 'L1 降档提示');
+    mob = await cbOrangeAtTier('L1');
+    assert.ok(mob, 'L1 色盲杂兵弹仍 = 橙像素');
+    await waitTier(b, 2, LOW);
+    sn = await b.snap();
+    assert.eq(sn.ebCap, 300, 'L2 弹幕上限 300');
+    assert.ok(sn.qToast && sn.qToast.indexOf('弹幕上限 300') >= 0, 'L2 降档提示');
+    mob = await cbOrangeAtTier('L2');
+    assert.ok(mob, 'L2 色盲杂兵弹仍 = 橙像素（L2 星尘减载/背景静态化不侵弹幕板）');
+    await waitTier(b, 1, HIGH);
+    sn = await b.snap();
+    assert.ok(sn.qToast && sn.qToast.indexOf('回升') >= 0, '回升提示（方向感知）');
+    await waitTier(b, 0, HIGH);
+    sn = await b.snap();
+    assert.eq(sn.ebCap, 400, '回升 L0 弹幕上限 400');
+    assert.eq(sn.tier, 0, '回到 L0');
+    assert.deep(b.errors, [], '全矩阵零未捕获异常');
     await b.ctx.close();
   });
 
