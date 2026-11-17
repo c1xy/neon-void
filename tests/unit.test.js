@@ -723,8 +723,8 @@ s.test('存档迁移矩阵 ⑧ duels 旧行缺字段：me/opp/res/deck/t 补全 
     const idx = getSource();
     const vs = idx.match(/NEON VOID v(\d+\.\d+\.\d+)/);
     assert.ok(vs, 'index.html 页脚版本串在位');
-    assert.eq(vs[1], '1.5.5', 'index.html 版本 = 1.5.5（本轮发版）');
-    assert.eq(+m[1], 15, 'sw.js CACHE = v15（上一版 v14 + 1）');
+    assert.eq(vs[1], '1.5.6', 'index.html 版本 = 1.5.6（本轮发版）');
+    assert.eq(+m[1], 16, 'sw.js CACHE = v16（上一版 v15 + 1）');
   });
   suite2.test('[R14-HOV] hover 白圈判定带 mouse.inside 门 + 触屏事件同步清 hover 态', () => {
     // 四处 hov 判定（title 按钮/升级卡/波次闸/结算钮）全部带 inside 门——stuck hover 清零
@@ -765,8 +765,46 @@ s.test('存档迁移矩阵 ⑧ duels 旧行缺字段：me/opp/res/deck/t 补全 
     assert.ok(src.indexOf('if (b.hpGhost == null || b.hpGhost < b.hp) b.hpGhost = b.hp;') >= 0, 'hpGhost 收敛门（追平/反超即复位，versus/ghost 换血量不残留白影）');
     assert.ok(src.indexOf("ctx.fillRect(bx + bwx, 21, ghx - bwx, 7);") >= 0 && src.indexOf('if (b.hitT > 0) {') >= 0, '血条白影残段 + 命中白闪双反馈在位');
     assert.ok(src.indexOf("hurtK > 0 && Math.sin(G.time * 40) > 0 ? '#ff5e6e' : '#4de3ff'") >= 0, '生命图标受击红闪（0.45s ~6Hz）');
-    assert.ok(src.indexOf("banner(MILES[i][1], MILES[i][2] + ' · ×' + G.combo, '#ffc233', true, 0);") >= 0, '连杀里程碑降为 prio 0（不再踩 BOSS 出场名横幅）');
+    assert.ok(src.indexOf("const shown = banner(MILES[i][1], MILES[i][2] + ' · ×' + G.combo, '#ffc233', true, 0);") >= 0, '连杀里程碑降为 prio 0（不再踩 BOSS 出场名横幅）');
+    assert.ok(src.indexOf("if (!shown) toast(MILES[i][1] + ' · ×' + G.combo, '#ffc233');") >= 0, '连杀里程碑让位时降级 toast 补可视化（[R17-AVSYNC] 音效不再独奏）');
     assert.ok(src.indexOf("if (G.combo >= 12) toast('连击中断 ×' + G.combo + ' · 节奏接上', '#ffc233');") >= 0, '连杀中断播报（≥12，toast 不占横幅位）');
+  });
+  suite2.test('[R17-PHANTOM] waveLogic 局内翻态守卫在位（连胜结算幻影 BOSS/场次多记清零）', () => {
+    assert.ok(src.indexOf("// [R17-PHANTOM] 局内翻态守卫：hitBoss→finishBoss→winGame 在 update 中途就把 state 翻成 'over'") >= 0, '守卫注释在位');
+    const wl = src.slice(src.indexOf('function waveLogic(dt) {'));
+    assert.ok(wl.indexOf("if (G.state !== 'playing') return; // [R17-PHANTOM]") >= 0 ||
+      (wl.indexOf('if (G.state !== \'playing\') return;') >= 0 && wl.indexOf('if (G.state !== \'playing\') return;') < wl.indexOf("if (G.mode === 'versus' || G.mode === 'ghost') return;")),
+      'state 守卫是 waveLogic 第一闸（在 versus/ghost 早退与 deadT 窗之前，压住 winGame 局内翻态后的帧尾推进）');
+    assert.ok(src.indexOf('// （G.wave/G.brush 被 +1，BOSS 名横幅盖住「全灭达成」）') >= 0, '幻影病灶注释在位（brushCd 未复位 + 帧尾 waveLogic 推进）');
+  });
+  suite2.test('[R17-IBUF] 演出窗输入缓冲：bufSkill 缓存 / flushInBuf 窗末首帧释放 / startGame·goTitle 清空', () => {
+    assert.ok(src.indexOf("if (bufSkill(code)) return; // [R17-IBUF] 升级/波次闸窗内技能键：缓存待窗末释放") >= 0, 'handleKey 技能分发前拦截在位');
+    assert.ok(src.indexOf("if (G.state === 'wgate' && code === 'Space') return false;") >= 0, '波次闸 Space=放行不缓存（wgateAct 语义保留）');
+    assert.ok(src.indexOf("if (G.state === 'playing') { flushInBuf(); update(RDT * G.slow); }") >= 0, 'flushInBuf 挂 playing 门首（窗末首帧释放，延迟 1 帧 ≪ 100ms）');
+    assert.eq((src.match(/G\.inBuf\.length = 0;/g) || []).length, 2, 'startGame + goTitle 两处清空（缓冲绝不跨局/跨场景滞留）');
+    assert.ok(src.indexOf("if (G.inBuf.length < 6) G.inBuf.push(code);") >= 0, '容量 6 防异常刷键');
+  });
+  suite2.test('[R17-GRAZEFX] 擦弹成功反馈闭环：迸发+冲击环+成功音调，L1/L2 减载、色盲换板、共享节流', () => {
+    assert.ok(src.indexOf("tone('triangle', 920 + Math.min(560, G.combo * 6)") >= 0, '成功音调在位（随连段微升，与预警上行音阶成闭环）');
+    assert.ok(src.indexOf("const gzc = CFG.cb === 1 ? CBPAL.graze : '#ffe233';") >= 0, '色盲模式随 CBPAL.graze 换板（与预警环带同源）');
+    assert.ok(src.indexOf("const gn = G.tier >= 1 ? 4 : 8;") >= 0, 'L1/L2 迸发减载');
+    assert.ok(src.indexOf("if (G.tier < 1) parts.push({ type: 2, x: b.x, y: b.y, vx: 0, vy: 0, rad: 3, vr: 260") >= 0, '冲击环仅 L0（低档位减一笔全屏绘制）');
+    assert.ok(src.indexOf("if (G.grzPingT > 0) G.grzPingT -= dt; // [R17-GRAZEFX] 擦弹成功音节流窗（G 级共享节流") >= 0, '节流窗在船循环外（双人合作不逐船双扣）');
+    assert.ok(src.indexOf("mile: n => { G.combo = n; milestones(); }") >= 0, 'NV_CHEAT.mile 断言钩子在位');
+  });
+  suite2.test('[R17-GLOW] 连杀里程碑边缘光晕：事件驱动零常驻 + 色盲换板 + L1/L2 跳过 + decay 衰减', () => {
+    const mg = src.slice(src.indexOf('function msGlow(c) {'));
+    assert.ok(mg.indexOf('if (G.tier >= 1) return;') >= 0 && mg.indexOf('if (G.tier >= 1) return;') < mg.indexOf('G.msGlowT = 0.9;'), 'L1/L2 触发即跳过');
+    assert.ok(src.indexOf("G.msGlowC = CFG.cb === 1 ? CBPAL.graze : (c || '#ffc233');") >= 0, '色盲换板 CBPAL.graze');
+    assert.ok(src.indexOf("if (!(G.msGlowT > 0) || G.tier >= 1 || G.state === 'title') return;") >= 0, 'drawMsGlow 三重门（无窗/低档/标题零绘制=默认外观不变）');
+    assert.ok(src.indexOf("drawMsGlow(); // [R17-GLOW] 连杀里程碑边缘光晕（事件驱动，窗内才画）") >= 0, 'render 挂载在 postFX 后');
+    assert.ok(src.indexOf("G.msGlowT = Math.max(0, G.msGlowT - dt); // [R17-GLOW]") >= 0, 'decay 衰减在位（暂停/选卡窗内也走 decay 不滞留）');
+    assert.ok(src.indexOf('inBuf: [], msGlowT: 0, msGlowC: \'\', grzPingT: 0,') >= 0, 'G 态字段在位');
+  });
+  suite2.test('[R17-QT2] toast 下移覆盖全部带 HUD 态（paused/levelup/wgate 不再压住计时器）', () => {
+    assert.ok(src.indexOf("y0 = (G.state === 'playing' || G.state === 'paused' || G.state === 'levelup' || G.state === 'wgate' ? 40 : 12) + SAFE.t;") >= 0,
+      '四态同管：有顶部 HUD 的态 toast 一律 y=40');
+    assert.ok(src.indexOf("y0 = (G.state === 'playing' ? 40 : 12) + SAFE.t;") < 0, '旧 playing-only 下移条件已替换');
   });
   suite2.test('[R15-FIX2/3] 死亡演出窗状态闸：禁暂停/禁技能/禁升级翻态 + 演出窗复位清单', () => {
     assert.ok(src.indexOf("if (G.state === 'playing' && G.deadT <= 0) setPause(true);") >= 0, '演出窗内 P/ESC 不再进暂停（复活幽灵+结算丢失通道封死）');

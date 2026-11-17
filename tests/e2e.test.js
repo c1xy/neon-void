@@ -607,6 +607,7 @@ async function backToTitle(b, ms) {
     const sn = await b.snap();
     assert.eq(sn.won, true, '真实胜利路径（winGame）');
     assert.eq(sn.state, 'over');
+    assert.eq(sn.boss, null, '结算屏 BOSS 已清场（[R17-PHANTOM] 守卫同样覆盖残影讨伐胜局）');
     await b.page.waitForTimeout(1600); // 等 CTA/按钮带入场
     await b.shot('ghost-win-settle-844x390');
     assertRowsSeparated(runsOf(await bottomRowsMax(b.page)), 'ghost 胜局结算（击杀链提示在场对照组）');
@@ -621,14 +622,63 @@ async function backToTitle(b, ms) {
     await b.waitState('playing');
     const before = await b.snap();
     assert.ok(before.boss && before.mode === 'brb', '连战 BOSS 在场');
+    assert.eq(before.wave, 1, '第 1 场出场（wave=1）');
     await b.page.evaluate('window.NV_CHEAT.hp1()'); // 辅助钩子：单场连战 BOSS 血量置 1
     await b.waitState('over', 20000);
     const sn = await b.snap();
     assert.eq(sn.won, true, '真实胜利路径（b.bn >= ord.length → winGame）');
     assert.eq(sn.state, 'over');
+    // [R17-PHANTOM] 连战胜局结算数据准确：胜局同帧不再 spawn 第 N+1 场幻影 BOSS
+    // （修前实证：wave=2 + ki=1 'enter' 的幻影 BOSS 压在胜利屏上，「迎战场次」多记一场）
+    assert.eq(sn.wave, 1, '结算场次=1（幻影多记已清零，修前此处为 2）');
+    assert.eq(sn.boss, null, '结算屏无幻影 BOSS（修前此处为 ki=1 enter 幻影）');
+    const lb = JSON.parse(await b.page.evaluate('localStorage.getItem("neonvoid_lb") || "[]"'));
+    assert.ok(lb.length && lb[0].w === 1, '荣誉榜 rec.w=1（brush 不多记），实得 ' + (lb.length ? lb[0].w : '无'));
     await b.page.waitForTimeout(1600);
     await b.shot('brb-win-settle-844x390');
     assertRowsSeparated(runsOf(await bottomRowsMax(b.page)), 'brb 胜局结算（无悬赏提示对照组）');
+    assert.deep(b.errors, [], '无未捕获异常');
+    await b.ctx.close();
+  });
+  s.test('[R17-PHANTOM] brb 连胜 2 场实机：连杀两场 BOSS → 结算场次=2 · 无第 3 场幻影', async () => {
+    const b = await boot(browser, base, { ls: { neonvoid_rush: JSON.stringify({ order: [0, 1], tier: 0 }) } });
+    await b.page.keyboard.press('b');
+    await b.waitStage('brb');
+    await b.page.keyboard.press('Enter');
+    await b.waitState('playing');
+    // hp1 速杀/清杂兵都会吃 XP → 升级三选一会挡住波次推进（update 冻结）；Digit1 随手选一张放行
+    const dismissLevelup = async () => {
+      const s = await b.snap();
+      if (s.state === 'levelup') { await b.page.keyboard.press('Digit1'); return true; }
+      return false;
+    };
+    await b.page.evaluate('window.NV_CHEAT.hp1()'); // 第 1 场速杀（bn=1 < ord.length=2 → 不翻胜局，brushCd=2.6）
+    for (let i = 0; i < 90; i++) { // 上限 45s：等第 2 场出场
+      if (await dismissLevelup()) { await b.page.waitForTimeout(150); continue; }
+      const s = await b.snap();
+      if (s.wave === 2 && s.boss) break;
+      if (s.state === 'over') throw new Error('第 1 场后误入结算（won=' + s.won + '）');
+      await b.page.waitForTimeout(500);
+    }
+    const mid = await b.snap();
+    assert.eq(mid.wave, 2, '第 2 场已出场');
+    assert.ok(mid.state === 'playing' || mid.state === 'levelup', '对局仍在进行');
+    await b.page.evaluate('window.NV_CHEAT.hp1()'); // 第 2 场速杀 → b.bn(2) >= ord.length(2) → winGame
+    for (let i = 0; i < 40; i++) { // 上限 20s：等结算（途中可能再弹升级选卡）
+      if (await dismissLevelup()) { await b.page.waitForTimeout(150); continue; }
+      if ((await b.snap()).state === 'over') break;
+      await b.page.waitForTimeout(500);
+    }
+    await b.page.waitForTimeout(600); // 留出可能的帧尾窗口：幻影若还有 spawn 通道就会在此显形
+    const sn = await b.snap();
+    assert.eq(sn.state, 'over', '20s 内进入结算');
+    assert.eq(sn.won, true, '连胜 2 场走真实胜利路径');
+    assert.eq(sn.wave, 2, '结算场次=2（不多记成 3）');
+    assert.eq(sn.boss, null, '结算屏无第 3 场幻影 BOSS');
+    assert.eq(sn.queue.length, 0, '无幻影出场队列残留');
+    const lb = JSON.parse(await b.page.evaluate('localStorage.getItem("neonvoid_lb") || "[]"'));
+    assert.ok(lb.length && lb[0].w === 2, '荣誉榜 rec.w=2，实得 ' + (lb.length ? lb[0].w : '无'));
+    await b.shot('brb-win2-settle-844x390');
     assert.deep(b.errors, [], '无未捕获异常');
     await b.ctx.close();
   });
@@ -1344,6 +1394,161 @@ async function backToTitle(b, ms) {
     assert.deep(b4.errors, [], '无未捕获异常');
     await b4.ctx.close();
   });
+  s.test('[R17-IBUF] 演出窗技能缓冲：升级三选一/波次闸窗内按技能键 → 窗末首帧原序释放（riftCd 落表即释放证据）', async () => {
+    // ① 升级窗：xp() → levelup；窗内 KeyQ+KeyE 缓存（riftCd/odCd 仍 0 = 未误发）→ Digit1 选卡 →
+    //    回 playing 首帧双技能已释放（flushInBuf 挂在 playing 门首，释放延迟 1 帧 ≪ 100ms 预算）
+    const b0 = await boot(browser, base);
+    await startModeByKey(b0.page, '1'); // 经典
+    await b0.page.waitForTimeout(2200);
+    const tPress0 = Date.now();
+    await b0.page.evaluate('window.NV_CHEAT.xp()');
+    await b0.waitState('levelup');
+    await b0.page.keyboard.press('KeyQ');
+    await b0.page.keyboard.press('KeyE');
+    let sn = await b0.snap();
+    assert.eq(sn.inBufN, 2, '升级窗内 Q/E 已缓存（inBufN=2）');
+    assert.eq(sn.riftCd, 0, '缓存态未误发（riftCd=0）');
+    assert.eq(sn.odCd, 0, '缓存态未误发（odCd=0）');
+    await b0.page.keyboard.press('Digit1'); // 选卡 → 回 playing
+    await b0.page.waitForFunction('window.NV_SNAP().state === "playing" && window.NV_SNAP().riftCd > 0 && window.NV_SNAP().odCd > 0', null, { timeout: 2000 });
+    sn = await b0.snap();
+    assert.ok(Date.now() - tPress0 < 3000, '释放总耗时受控（含选卡等待）');
+    assert.eq(sn.inBufN, 0, '释放后缓冲清空');
+    assert.ok(sn.riftCd > 20 && sn.odCd > 25, 'Q/E 双技能窗末释放（riftCd=' + sn.riftCd + ' odCd=' + sn.odCd + '，满 CD 计时起点）');
+    assert.deep(b0.errors, [], '无未捕获异常');
+    await b0.ctx.close();
+    // ② 波次闸窗：wgate 设置 → 清波进闸 → 闸内 KeyQ 缓存（Space 例外仍走放行）→ Enter 放行 → 释放
+    const b1 = await boot(browser, base, { ls: { neonvoid_cfg: JSON.stringify({ wgate: 1 }) } });
+    await startModeByKey(b1.page, '1');
+    await b1.page.waitForFunction('window.NV_SNAP().state === "wgate"', null, { timeout: 60000 }); // 1 波自然清场进闸
+    await b1.page.keyboard.press('KeyQ');
+    sn = await b1.snap();
+    assert.eq(sn.inBufN, 1, '波次闸内 KeyQ 已缓存');
+    await b1.page.keyboard.press('Enter'); // 放行下一波
+    await b1.page.waitForFunction('window.NV_SNAP().state === "playing" && window.NV_SNAP().riftCd > 0', null, { timeout: 2000 });
+    sn = await b1.snap();
+    assert.eq(sn.inBufN, 0, '闸末释放、缓冲清空');
+    assert.deep(b1.errors, [], '无未捕获异常');
+    await b1.ctx.close();
+  });
+  s.test('[R17-GRAZEFX] 擦弹成功瞬间反馈闭环：gshotIn → grazes++ + 落点火花迸发像素（A/B 差分）· 预警环带仍在位', async () => {
+    const b0 = await boot(browser, base);
+    await startModeByKey(b0.page, '7'); // 擦弹专精（禁火，杂兵被清/撤离，落点邻域干净）
+    await b0.page.waitForTimeout(2800);
+    const gr0 = (await b0.snap()).grazes;
+    const pos = await b0.page.evaluate('window.NV_CHEAT.gshotIn()'); // 弹落 0.8×grazeR → 下一帧走真实擦弹成功路径
+    await b0.page.waitForTimeout(60); // 迸发粒子寿命 0.15-0.38s，即刻采样
+    const snA = await b0.snap();
+    assert.ok(snA.grazes > gr0, '擦弹成功入账（grazes ' + gr0 + ' → ' + snA.grazes + '）');
+    // A/B 差分像素：A=成功后即刻（迸发在），B=600ms 后（迸发已亡，环带/弹静止常驻）→ 差值 = 迸发本体
+    const probeBurst = async () => b0.page.evaluate(([px, py]) => {
+      const cv = document.getElementById('nv-canvas');
+      const g = cv.getContext('2d');
+      const R2 = 36, x0 = Math.max(0, px - R2), y0 = Math.max(0, py - R2);
+      const d = g.getImageData(x0, y0, Math.min(R2 * 2, cv.width - x0), Math.min(R2 * 2, cv.height - y0)).data;
+      let gold = 0;
+      for (let i = 0; i < d.length; i += 4) if (d[i] > 170 && d[i + 1] > 170 && d[i + 2] < 150) gold++;
+      return gold;
+    }, pos);
+    const goldA = await probeBurst();
+    await b0.page.waitForTimeout(600);
+    const goldB = await probeBurst();
+    assert.ok(goldA - goldB >= 8, '擦弹落点火花迸发（金/白亮像素 A/B 差分 ≥8）: A=' + goldA + ' B=' + goldB + ' pos=' + JSON.stringify(pos));
+    assert.deep(b0.errors, [], '无未捕获异常');
+    await b0.ctx.close();
+  });
+  s.test('[R17-GLOW] 连杀里程碑边缘光晕：触发亮起+自然衰减 · 被压播报降级 toast（音画同步）· 色盲换板 · L1+ 跳过', async () => {
+    // ① 默认板：mile(10) 走真实 milestones() → 横幅上场（无让位）→ msGlow 亮起 → ~1s 自然衰减
+    const b0 = await boot(browser, base);
+    await startModeByKey(b0.page, '1');
+    await b0.page.waitForTimeout(2200);
+    assert.eq((await b0.snap()).msGlowT, 0, '无里程碑时光晕窗为 0（默认外观不变，事件驱动零绘制）');
+    await b0.page.evaluate('window.NV_CHEAT.mile(10)');
+    await b0.page.waitForTimeout(120);
+    let sn = await b0.snap();
+    assert.ok(sn.msGlowT > 0 && sn.msGlowT <= 0.9, '里程碑光晕窗亮起（msGlowT=' + sn.msGlowT + '）');
+    assert.eq(sn.msGlowC, '#ffc233', '默认板里程碑金');
+    assert.eq(sn.qToast, null, '横幅上场时无降级 toast（音画同步：横幅+音效同帧）');
+    // 边缘光晕像素证据：左下角 12×12 均值 A/B 差分（衰减后同角回基线）
+    const cornerAvg = async () => b0.page.evaluate(() => {
+      const cv = document.getElementById('nv-canvas');
+      const g = cv.getContext('2d');
+      const d = g.getImageData(2, cv.height - 14, 12, 12).data;
+      let r = 0, n = 0;
+      for (let i = 0; i < d.length; i += 4) { r += d[i]; n++; }
+      return Math.round(r / n * 10) / 10;
+    });
+    const rA = await cornerAvg();
+    await b0.page.waitForTimeout(1100); // 0.9s 窗走完
+    sn = await b0.snap();
+    assert.eq(sn.msGlowT, 0, '光晕窗自然衰减归零');
+    const rB = await cornerAvg();
+    assert.ok(rA - rB >= 5, '边缘光晕像素可见且随窗退场（角部 R 均值 A=' + rA + ' → B=' + rB + '）');
+    assert.deep(b0.errors, [], '无未捕获异常');
+    await b0.ctx.close();
+    // ② 音画同步修复面：BOSS 出场名横幅（prio 2）在播 < 半程时里程碑让位 → 降级 toast 同帧补可视化（修前音效独奏）
+    const b1 = await boot(browser, base);
+    await startModeByKey(b1.page, '3'); // BOSS RUSH：出场名横幅 prio 2 展开
+    let entered = false;
+    for (let i = 0; i < 80 && !entered; i++) {
+      const s = await b1.snap();
+      if (s.boss && s.boss[1] === 'enter') entered = true; else await b1.page.waitForTimeout(50);
+    }
+    assert.ok(entered, 'BOSS 入场镜头中（出场名横幅在播）');
+    await b1.page.evaluate('window.NV_CHEAT.mile(10)');
+    await b1.page.waitForTimeout(120);
+    sn = await b1.snap();
+    assert.ok(sn.qToast && sn.qToast.indexOf('连击大师') >= 0, '让位时降级 toast 补可视化（修前此处 null=音效独奏）: ' + sn.qToast);
+    assert.ok(sn.msGlowT > 0, '光晕照常亮起（toast 与横幅互不占位）');
+    assert.deep(b1.errors, [], '无未捕获异常');
+    await b1.ctx.close();
+    // ③ 色盲板：msGlowC 换 CBPAL.graze 金黄（黄-蓝轴全色觉可读）
+    const b2 = await boot(browser, base, { ls: { neonvoid_cfg: JSON.stringify({ cb: 1 }) } });
+    await startModeByKey(b2.page, '1');
+    await b2.page.waitForTimeout(2200);
+    await b2.page.evaluate('window.NV_CHEAT.mile(10)');
+    await b2.page.waitForTimeout(120);
+    sn = await b2.snap();
+    assert.eq(sn.msGlowC, '#ffe233', '色盲模式光晕换板 CBPAL.graze');
+    assert.deep(b2.errors, [], '无未捕获异常');
+    await b2.ctx.close();
+    // ④ FPS 降档：L1/L2 直接跳过（纯装饰为流畅度让路），横幅可视化保留
+    const b3 = await boot(browser, base);
+    await startModeByKey(b3.page, '1');
+    await waitTier(b3, 2, 'window.NV_CHEAT.fps(30); window.NV_CHEAT.lowNow()');
+    assert.eq((await b3.snap()).tier, 2, '已降档 L2');
+    await b3.page.evaluate('window.NV_CHEAT.mile(10)');
+    await b3.page.waitForTimeout(120);
+    sn = await b3.snap();
+    assert.eq(sn.msGlowT, 0, 'L2 光晕跳过（msGlowT 保持 0）');
+    assert.ok(!(sn.qToast && sn.qToast.indexOf('连击大师') >= 0), 'L2 横幅可视化保留（降档 toast 在播不碍事，里程碑自身无降级 toast）: ' + sn.qToast);
+    assert.deep(b3.errors, [], '无未捕获异常');
+    await b3.ctx.close();
+  });
+  s.test('[R17-MEM] 跨局记忆泄漏清零：经典局到过的连杀档不再让 BOSS 局里程碑哑火（G.ms 随局复位）', async () => {
+    // 修前路径：经典局 mile(10) → G.ms=[10] 落在全局单例 → 结算回标题开 BOSS RUSH（不走 startWave）
+    // → 连击到 10 时 G.ms.indexOf(10)≥0 → 里程碑播报/音效/光晕整段哑火
+    const b = await boot(browser, base);
+    await startModeByKey(b.page, '1'); // 经典
+    await b.page.waitForTimeout(2200);
+    await b.page.evaluate('window.NV_CHEAT.mile(10)');
+    await b.page.waitForTimeout(120);
+    assert.ok((await b.snap()).msGlowT > 0, '经典局里程碑正常（光晕亮起）');
+    await forceOver(b); // 速死 → 结算
+    await b.page.waitForTimeout(800); // over>0.7 放行 T
+    await b.page.keyboard.press('KeyT'); // 回标题
+    await b.waitStage('mode');
+    await b.page.keyboard.press('3'); // BOSS RUSH（startGame 直出 BOSS，全程不经过 startWave）
+    await b.waitStage('players');
+    await b.page.keyboard.press('1');
+    await b.waitState('playing');
+    await b.page.evaluate('window.NV_CHEAT.mile(10)');
+    await b.page.waitForTimeout(120);
+    const sn = await b.snap();
+    assert.ok(sn.msGlowT > 0, 'BOSS 局连杀 10 里程碑照常播报（光晕亮起；修前 G.ms 跨局残留 → 哑火）: msGlowT=' + sn.msGlowT);
+    assert.deep(b.errors, [], '无未捕获异常');
+    await b.ctx.close();
+  });
   s.test('色盲模式 × FPS 降级组合矩阵：cb=1 下 L0→L1→L2→回升全链路（治理器 + 弹幕上限 + 色盲橙弹像素逐档核验）', async () => {
     // 治理器迁移钩子成对重发（同画质三档用例），色盲像素断言逐档重采——色盲换板与降档治理互不干扰
     const b = await boot(browser, base, { ls: { neonvoid_cfg: JSON.stringify({ cb: 1 }) } });
@@ -1455,6 +1660,43 @@ async function backToTitle(b, ms) {
     PERF.heap = { startMB: samples[0].mb, endGCMB: +(h1 / 1048576).toFixed(2), growthMB, samples };
     console.log('  · heap 30s：' + samples[0].mb + 'MB → ' + (h1 / 1048576).toFixed(2) + 'MB（GC 后），增长 ' + growthMB + 'MB');
     assert.ok(growthMB <= 5, '30s heap 增长 ' + growthMB + 'MB ≤ 5MB');
+    await b.ctx.close();
+  });
+  s.test('[R17-SOAK] 连局压测：8 连局（6s 自然对局 → kill 速死 → Enter 真实重开）零 pageerror + heap 预算不劣化', async () => {
+    // 连局正是 [FIX-MEM1] 的释放纪律考场：endSnap 快照/录像缓冲/弹幕池每局必须归位，不跨局累积。
+    // 预算口径：第 1 局末 GC 基线 → 第 8 局末 GC 后增长 ≤3MB（若快照/Canvas 逐局泄漏会轻松 +9MB）。
+    const b = await boot(browser, base);
+    await startModeByKey(b.page, '1'); // 经典：最短结算链路，波次/击杀/受击真实流
+    const client = await b.ctx.newCDPSession(b.page);
+    await client.send('HeapProfiler.enable');
+    const gcRead = async () => {
+      await client.send('HeapProfiler.collectGarbage');
+      await client.send('HeapProfiler.collectGarbage');
+      await b.page.waitForTimeout(120);
+      return b.page.evaluate('performance.memory.usedJSHeapSize');
+    };
+    let hFirst = null;
+    const rounds = [];
+    for (let round = 1; round <= 8; round++) {
+      await b.page.waitForTimeout(6000); // 每局 6s 自然对局（出兵/击杀/粒子/音频调度全真实流）
+      if (round === 1) hFirst = await gcRead(); // 首局末 GC 基线（代码路径已热，排除 JIT 暖机噪声）
+      await forceOver(b); // kill() 循环走真实死亡演出→gameOver→recordScore
+      const snOver = await b.snap();
+      assert.eq(snOver.state, 'over', '第 ' + round + ' 局进入结算');
+      assert.eq(snOver.errStreak, 0, '第 ' + round + ' 局无自愈触发');
+      await b.page.keyboard.press('Enter'); // over 态 Enter → startGame 真实连局路径（不经过 goTitle）
+      await b.waitState('playing', 15000);
+      rounds.push({ round, overAt: snOver.wave, heapMB: null });
+    }
+    const hLast = await gcRead();
+    const growthMB = +((hLast - hFirst) / 1048576).toFixed(2);
+    const snFinal = await b.snap();
+    PERF.soak = { rounds: 8, firstGCMB: +(hFirst / 1048576).toFixed(2), lastGCMB: +(hLast / 1048576).toFixed(2), growthMB };
+    console.log('  · 连局 heap：' + (hFirst / 1048576).toFixed(2) + 'MB(第1局末 GC) → ' + (hLast / 1048576).toFixed(2) + 'MB(第8局末 GC)，增长 ' + growthMB + 'MB');
+    assert.ok(growthMB <= 3, '8 连局 heap 增长 ' + growthMB + 'MB ≤ 3MB（快照/录像/结算资源跨局不滞留）');
+    assert.eq(snFinal.state, 'playing', '压测收尾仍在真实对局态（进程存活）');
+    assert.eq(snFinal.errStreak, 0, '8 连局零自愈触发');
+    assert.deep(b.errors, [], '8 连局零 pageerror');
     await b.ctx.close();
   });
   s.test('性能基线：SW 离线启动 ≤3s（先在线装 SW → 断网重载 → NV_SNAP 就绪）', async () => {
