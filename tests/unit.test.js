@@ -723,8 +723,8 @@ s.test('存档迁移矩阵 ⑧ duels 旧行缺字段：me/opp/res/deck/t 补全 
     const idx = getSource();
     const vs = idx.match(/NEON VOID v(\d+\.\d+\.\d+)/);
     assert.ok(vs, 'index.html 页脚版本串在位');
-    assert.eq(vs[1], '1.5.6', 'index.html 版本 = 1.5.6（本轮发版）');
-    assert.eq(+m[1], 16, 'sw.js CACHE = v16（上一版 v15 + 1）');
+    assert.eq(vs[1], '1.5.7', 'index.html 版本 = 1.5.7（本轮发版）');
+    assert.eq(+m[1], 17, 'sw.js CACHE = v17（上一版 v16 + 1）');
   });
   suite2.test('[R14-HOV] hover 白圈判定带 mouse.inside 门 + 触屏事件同步清 hover 态', () => {
     // 四处 hov 判定（title 按钮/升级卡/波次闸/结算钮）全部带 inside 门——stuck hover 清零
@@ -790,6 +790,48 @@ s.test('存档迁移矩阵 ⑧ duels 旧行缺字段：me/opp/res/deck/t 补全 
   suite2.test('[R16-COS] 关于页 ⚡ 矮视口让位兜底：不高于正文流末位（旧 min(H*0.84,…) 把 ⚡ 钳回最后一行叠印）', () => {
     assert.ok(src.indexOf("txt('⚡', cx, Math.max(Math.min(H * 0.84, cyv + 16), cyv + 6)") >= 0, '⚡ max(min(H*0.84,cyv+16), cyv+6) 让位兜底在位（844×390 实测 ⚡ 区顶 y≥344 > 正文末行）');
     assert.ok(src.indexOf("txt('⚡', cx, Math.min(H * 0.84, cyv + 16)") < 0, '旧无兜底写法已移除');
+  });
+  suite2.test('[R18-QT3] toast 避让：落点按态分支 + 绘制层级后移到 drawOverlay 之后（levelup/wgate/paused 不再被罩暗/大标题压住）', () => {
+    assert.ok(src.indexOf("if (G.state === 'levelup') y0 = H < 560 ? H * 0.15 + 22 : 40;") >= 0, 'levelup 矮视口落副标题带 H*0.15+22（844×390 中轴唯一整段空档）');
+    assert.ok(src.indexOf("else if (G.state === 'playing' || G.state === 'paused' || G.state === 'wgate') y0 = 40;") >= 0, 'paused/wgate 与 playing 同落 40（R17-QT2 语义保留：四态同画顶部 HUD）');
+    const rq = src.indexOf('drawQToast();', src.indexOf('drawOverlay();', src.indexOf('function render()')));
+    assert.ok(rq > 0, 'render 内 drawQToast 调用在 drawOverlay 之后（层级后移）');
+    assert.ok(src.indexOf("if (!(G.qToast && H < 560)) txt('LEVEL UP · 选择一项强化") >= 0, '副标题在胶囊占带期间让位不画（同带双文字互穿防御）');
+  });
+  suite2.test('[R18-LV2] 升级卡排矮横屏收编：极矮(H<367)复用纵排 + 367≤H<560 压缩卡高钳出副标题带', () => {
+    assert.ok(src.indexOf('const vert = W < 620 || H < 367;') >= 0, 'rollCards 与 drawOverlay 同一布局开关');
+    assert.ok(src.indexOf('ch = Math.min(196, Math.floor(H - 102 - (H * 0.15 + 46)));') >= 0, '压缩卡高：卡排底给重抽钮(44)+经验条(H-54)留位');
+    assert.ok(src.indexOf('y = Math.max(H * 0.44 - ch / 2, H * 0.15 + 46)') >= 0, '横排卡排顶钳到副标题下缘（844×390 副标题不再被覆盖 85%）');
+    assert.ok(src.indexOf('const cc = c.h < 196;') >= 0, '压缩卡内容偏移开关在位');
+  });
+  suite2.test('[R18-DEPTH] 背景深度动画三档降级：星野漂移/星云视差/网格深呼吸 L2 全冻结（低档仅静态）', () => {
+    assert.ok(src.indexOf('const dr = G.tier < 2 ? RDT : 0;') >= 0, '星野漂移 L2 冻结');
+    assert.ok(src.indexOf('const mx = W * 0.08, my = H * 0.08;') >= 0, '星云视差滚层 8% 边距平移（软渐变无接缝）');
+    assert.ok(src.indexOf("} else ctx.drawImage(nebCv, 0, 0, W, H);") >= 0, '星云视差 L2 维持 (0,0) 原样绘制');
+    assert.ok(src.indexOf('G.gridWaveT = G.tier >= 1 ? 12 : 6;') >= 0, '网格深呼吸 L1 减频 12s / L0 6s；L2 停跳（tier<2 门）');
+    assert.ok(src.indexOf('gridPush(R(0, W), R(0, H), Math.max(W, H) * 0.55, 260);') >= 0, '深呼吸用 Math.random 表现通道（不碰 RSTATE）');
+  });
+  suite2.test('[R18-BOOM][R18-DSTREAM] BOSS 分帧爆散队列 + 残影死亡数据流：引信双路径推进 + 粒子预算内', () => {
+    assert.ok(src.indexOf('function tickBossBoom(dt)') >= 0, '分帧爆散队列推进器在位');
+    assert.ok(src.indexOf('tickBossBoom(dt); // [R18-BOOM] 核心摧毁分帧爆散（对局中路径）') >= 0, 'update 路径推进');
+    assert.ok(src.indexOf('tickBossBoom(dt); // [R18-BOOM] 核心摧毁分帧爆散（胜局结算屏路径：winGame 翻态后演出继续）') >= 0, 'updateAmbient 路径推进（over 态演出不断）');
+    assert.ok(src.indexOf("boom(b.x, b.y, '#ff3355', 26, 14);") >= 0, '首爆 26 即时 + 3 波排队（总 ~104 ≤ PMAX 320/750）');
+    assert.ok(src.indexOf("G.waveScanT = 0.3; // [R18-SCAN]") >= 0, '扫描线引信挂在 startWave（开局/清波/波间闸三路径共用）');
+    assert.ok(src.indexOf("G.chainCode = bountyFromChain(); // 击杀链：构筑传承 + 本场狩猎战绩叠加") >= 0 && src.indexOf("[R18-DSTREAM]") >= 0, '残影数据流与击杀链编译同帧（主题演出）');
+  });
+  suite2.test('[R18-WG1] 波次闸矮视口节奏：波段/标题/副标题/战绩行全部相对按钮带定位（叠字/穿钮清零）', () => {
+    assert.ok(src.indexOf('const wgBand = H < 560 ? H * 0.545 - 38 : H * 0.462;') >= 0, '矮视口波段自按钮带顶倒推（H<484 副标题叠「下一波」行、H<340 波段交按钮带的旧案清零）');
+    assert.ok(src.indexOf("H < 560 ? H * 0.545 + 56 : H * 0.68, 12.5") >= 0, '战绩行矮视口压到按钮带下方 12px（H<385 旧案：战绩行从按钮下缘穿过）');
+  });
+  suite2.test('[R18-PAUSE1] 暂停屏矮视口压缩：构筑/M-F 行不再压经验条与技能键位标签 + 浮字随暂停走完生命周期', () => {
+    assert.ok(src.indexOf('const pc = H < 560;') >= 0 && src.indexOf("if (!pc) txt('M 静音 · F 全屏'") >= 0, '矮视口 M/F 提示并入操作行（旧 H*0.88 行压技能圈键位标签）');
+    assert.ok(src.indexOf("cx, pc ? H * 0.755 : H * 0.825, W * 0.85") >= 0, '构筑 wrap 矮视口上收（旧 H*0.825 在 H=320 压经验条 H-54）');
+    assert.ok(src.indexOf('else { decay(RDT); updTexts(RDT); }') >= 0, '暂停/升级分支同时推进浮字（冻结浮字整段叠在暂停 UI 上的旧案清零）');
+  });
+  suite2.test('[R18-ACH1] 成就网格两级收缩：chh<24 转紧凑单行卡（末行裁切/压返回钮/卡内双行互叠清零）', () => {
+    assert.ok(src.indexOf('if (chh < 24) {') >= 0 && src.indexOf('compactA = true;') >= 0, 'chh<24 → 去描述行 + 行距 6→4 + chh 下限 14（36 枚 × 6 行在 844×320 旧版溢出 74px）');
+    assert.ok(src.indexOf('compactA ? ay + chh / 2 : ay + chh * 0.36') >= 0, '紧凑卡名称垂直居中');
+    assert.ok(src.indexOf("if (!compactA) txt(a.d,") >= 0, '双行卡（桌面 chh≥24）保留描述行，几何逐像素不变');
   });
   const r2 = await suite2.run();
   const fails = r.fails.length + r2.fails.length;

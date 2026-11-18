@@ -499,6 +499,109 @@ async function backToTitle(b, ms) {
     await b.ctx.close();
   });
 
+  /* ================= [R18-FX] 特效开关回归（降级档位下动效正确关闭）+ [R18-QT3] toast 避让 ================= */
+  s.test('R18 特效开关：星野漂移/网格深呼吸 L0 开 → L2 冻结（低档仅静态）+ 扫描线转场 0.3s', async () => {
+    // ① L0 全效：星野分层漂移（st0 首星坐标位移）+ 网格深呼吸引信走动；扫描线走真实 startWave 路径
+    const b0 = await boot(browser, base);
+    await startModeByKey(b0.page, '1');
+    const g0 = await b0.snap();
+    await b0.page.waitForTimeout(600);
+    const g1 = await b0.snap();
+    assert.ok(g1.st0[1] > g0.st0[1], 'L0 星野漂移：首星 y ' + g0.st0[1] + '→' + g1.st0[1]);
+    assert.ok(g1.gridWaveT !== g0.gridWaveT, 'L0 网格深呼吸引信走动：' + g0.gridWaveT + '→' + g1.gridWaveT);
+    await b0.page.evaluate('window.NV_CHEAT.wave()');
+    const sc = await b0.snap();
+    assert.ok(sc.waveScanT > 0 && sc.waveScanT <= 0.3, '扫描线引信 ∈ (0,0.3]：' + sc.waveScanT);
+    await b0.shot('r18-scanline-mid');
+    await b0.page.waitForTimeout(400);
+    assert.eq((await b0.snap()).waveScanT, 0, '0.3s 后扫描线引信归零');
+    assert.deep(b0.errors, [], '无未捕获异常');
+    await b0.ctx.close();
+    // ② L2（fx=2 真实 cfg 锁档）：漂移/深呼吸整段冻结（「低档仅静态」承诺），扫描线作为
+    //    一次性事件提示保留（0.3s 引信，非常驻开销）
+    const b2 = await boot(browser, base, { ls: { neonvoid_cfg: JSON.stringify({ fx: 2 }) } });
+    await startModeByKey(b2.page, '1');
+    assert.eq((await b2.snap()).tier, 2, 'fx=2 锁 L2');
+    const f0 = await b2.snap();
+    await b2.page.waitForTimeout(600);
+    const f1 = await b2.snap();
+    assert.eq(f1.st0[1], f0.st0[1], 'L2 星野漂移冻结（y）');
+    assert.eq(f1.st0[0], f0.st0[0], 'L2 星野漂移冻结（x）');
+    assert.eq(f1.gridWaveT, f0.gridWaveT, 'L2 网格深呼吸冻结');
+    await b2.page.evaluate('window.NV_CHEAT.wave()');
+    assert.ok((await b2.snap()).waveScanT > 0, 'L2 扫描线保留（0.3s 一次性事件提示）');
+    assert.deep(b2.errors, [], '无未捕获异常');
+    await b2.ctx.close();
+  });
+  s.test('R18 toast 避让落点（844×390）：levelup 落副标题带且不被状态遮罩压暗（绘制层级后移）', async () => {
+    const b = await boot(browser, base); // 844×390 触屏基准视口
+    await startModeByKey(b.page, '1');
+    await b.page.evaluate('window.NV_CHEAT.xp()');
+    await b.waitState('levelup');
+    await b.page.waitForTimeout(420); // 卡片入场动画完成（卡排顶已钳到 H*0.15+46）
+    await b.page.evaluate('window.NV_CHEAT.toast()');
+    await b.page.waitForFunction('window.NV_SNAP().qToast !== null', null, { timeout: 5000 });
+    await b.page.waitForTimeout(350); // 0.25s 淡入完成（alpha=1）
+    const lv = await b.page.evaluate(() => {
+      const cv = document.querySelector('canvas');
+      const H = cv.height, W = cv.width; // e2e context dpr=1：backing = CSS 尺寸
+      const c2 = cv.getContext('2d');
+      const grab = (x, y, w, h) => {
+        const d = c2.getImageData(Math.round(x), Math.round(y), Math.round(w), Math.round(h)).data;
+        let sum = 0, mx = 0; const n = d.length / 4;
+        for (let i = 0; i < d.length; i += 4) { const v = (d[i] + d[i + 1] + d[i + 2]) / 3; sum += v; if (v > mx) mx = v; }
+        return { avg: sum / n, max: mx };
+      };
+      const y0 = H < 560 ? H * 0.15 + 22 : 40;
+      return {
+        H, y0,
+        pill: grab(W / 2 - 110, y0 + 2, 220, 20),   // 胶囊本体带
+        old: grab(W / 2 - 110, 14, 220, 18),        // 旧落点 y12（对局态 40 的老位置在 levelup 无遮挡带）
+        titleTop: grab(W / 2 - 90, H * 0.15 - 26, 180, 10) // 大标题上缘带（胶囊不得侵入）
+      };
+    });
+    assert.ok(lv.H < 560, '844×390 走矮视口落点分支（H=' + lv.H + '）');
+    assert.ok(lv.pill.max > 150, 'toast 胶囊在副标题带可见（亮像素 max=' + lv.pill.max + '）');
+    assert.ok(lv.pill.avg > lv.old.avg * 1.6, '胶囊带显著亮于旧落点带（' + lv.pill.avg.toFixed(1) + ' vs ' + lv.old.avg.toFixed(1) + '）');
+    assert.ok((await b.snap()).qToast, 'toast 消息在快照可见（NV_SNAP.qToast）');
+    await b.shot('r18-levelup-toast-390');
+    assert.deep(b.errors, [], '无未捕获异常');
+    await b.ctx.close();
+  });
+  s.test('R18 BOSS 分帧爆散：队列逐波引信（峰值 ≤ 粒子预算）+ 残影死亡数据流字符流', async () => {
+    // ① boss 连战（数字 3）：hp1 走真实受击死亡 → finishBoss 分帧入队 → 0.5s 内逐波爆散
+    const b = await boot(browser, base);
+    await b.page.keyboard.press('3');
+    await b.page.waitForFunction('window.NV_SNAP().tStage === "players"', null, { timeout: 8000 });
+    await b.page.keyboard.press('1');
+    await b.waitState('playing');
+    assert.ok((await b.snap()).boss, 'BOSS 在场');
+    await b.page.evaluate('window.NV_CHEAT.hp1()');
+    await b.page.waitForFunction('window.NV_SNAP().bossBoomN > 0 || window.NV_SNAP().state === "over"', null, { timeout: 30000 });
+    const mid = await b.snap();
+    assert.ok(mid.bossBoomN > 0, '分帧爆散队列已入队（非一次性放完）：bossBoomN=' + mid.bossBoomN);
+    assert.ok(mid.partsN <= mid.pmax, '粒子峰值 ≤ 预算：' + mid.partsN + '/' + mid.pmax + '（弹幕上限内）');
+    await b.shot('r18-boom-staged');
+    await b.page.waitForFunction('window.NV_SNAP().bossBoomN === 0', null, { timeout: 5000 });
+    assert.deep(b.errors, [], '无未捕获异常');
+    await b.ctx.close();
+    // ② 残影悬赏：hp1 → winGame → 核心数据化上传字符流（14 枚十六进制 token 浮字）
+    const code = codec.bountyPack({ lv: new Array(NC).fill(0), wave: 3, score: 100, grazes: 0, chain: 0 });
+    const g = await boot(browser, base, { hash: '#bounty=' + code });
+    await g.page.keyboard.press('Enter');
+    await g.waitState('playing');
+    assert.ok((await g.snap()).boss, '残影 BOSS 在场');
+    await g.page.evaluate('window.NV_CHEAT.hp1()');
+    await g.waitState('over', 30000);
+    const ov = await g.snap();
+    assert.ok(ov.won, '残影讨伐胜局');
+    assert.ok(ov.textsN >= 10, '死亡数据流字符流在场：textsN=' + ov.textsN);
+    await g.page.waitForTimeout(650); // 白闪衰减后目检截图
+    await g.shot('r18-ghost-dstream');
+    assert.deep(g.errors, [], '无未捕获异常');
+    await g.ctx.close();
+  });
+
   /* ================= 种子对决全链路 ================= */
   s.test('种子对决全链路：构建→码→开局→成绩码→对决史→判胜负', async () => {
     const b = await boot(browser, base);
