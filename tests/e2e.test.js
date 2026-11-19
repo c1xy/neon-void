@@ -79,7 +79,8 @@ async function boot(browser, base, opts) {
   opts = opts || {};
   // hasTouch → Chromium 设备模拟把 pointer 标为 coarse → 命中游戏的移动端横屏媒体查询，
   // 画布铺满 844×390（桌面 pointer:fine 会退回 16:10 信箱式 599×374，不是真机形态）
-  const ctx = await browser.newContext({ viewport: VIEW, deviceScaleFactor: 1, hasTouch: true });
+  // [R18b] opts.vp：极矮视口（844×320）等用例注入，缺省 844×390 不变
+  const ctx = await browser.newContext({ viewport: opts.vp || VIEW, deviceScaleFactor: 1, hasTouch: true });
   try { await ctx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: base }); } catch (e) {}
   if (opts.ls) {
     for (const [k, v] of Object.entries(opts.ls)) {
@@ -715,6 +716,7 @@ async function backToTitle(b, ms) {
     const sn = await b.snap();
     assert.eq(sn.won, true, '真实胜利路径（winGame）');
     assert.eq(sn.state, 'over');
+    assert.eq(sn.boss, null, '结算屏 BOSS 已清场（[R17-PHANTOM] 守卫同样覆盖残影讨伐胜局）');
     await b.page.waitForTimeout(1600); // 等 CTA/按钮带入场
     await b.shot('ghost-win-settle-844x390');
     assertRowsSeparated(runsOf(await bottomRowsMax(b.page)), 'ghost 胜局结算（击杀链提示在场对照组）');
@@ -729,16 +731,120 @@ async function backToTitle(b, ms) {
     await b.waitState('playing');
     const before = await b.snap();
     assert.ok(before.boss && before.mode === 'brb', '连战 BOSS 在场');
+    assert.eq(before.wave, 1, '第 1 场出场（wave=1）');
     await b.page.evaluate('window.NV_CHEAT.hp1()'); // 辅助钩子：单场连战 BOSS 血量置 1
     await b.waitState('over', 20000);
     const sn = await b.snap();
     assert.eq(sn.won, true, '真实胜利路径（b.bn >= ord.length → winGame）');
     assert.eq(sn.state, 'over');
+    // [R17-PHANTOM] 连战胜局结算数据准确：胜局同帧不再 spawn 第 N+1 场幻影 BOSS
+    // （修前实证：wave=2 + ki=1 'enter' 的幻影 BOSS 压在胜利屏上，「迎战场次」多记一场；
+    //  第 18 轮陈旧基线合并把守卫回退致其复发，[R19-MEMLOOP] 恢复）
+    assert.eq(sn.wave, 1, '结算场次=1（幻影多记已清零，修前此处为 2）');
+    assert.eq(sn.boss, null, '结算屏无幻影 BOSS（修前此处为 ki=1 enter 幻影）');
+    const lb = JSON.parse(await b.page.evaluate('localStorage.getItem("neonvoid_lb") || "[]"'));
+    assert.ok(lb.length && lb[0].w === 1, '荣誉榜 rec.w=1（brush 不多记），实得 ' + (lb.length ? lb[0].w : '无'));
     await b.page.waitForTimeout(1600);
     await b.shot('brb-win-settle-844x390');
     assertRowsSeparated(runsOf(await bottomRowsMax(b.page)), 'brb 胜局结算（无悬赏提示对照组）');
     assert.deep(b.errors, [], '无未捕获异常');
     await b.ctx.close();
+  });
+  s.test('[R17-PHANTOM] brb 连胜 2 场实机：连杀两场 BOSS → 结算场次=2 · 无第 3 场幻影', async () => {
+    const b = await boot(browser, base, { ls: { neonvoid_rush: JSON.stringify({ order: [0, 1], tier: 0 }) } });
+    await b.page.keyboard.press('b');
+    await b.waitStage('brb');
+    await b.page.keyboard.press('Enter');
+    await b.waitState('playing');
+    // hp1 速杀/清杂兵都会吃 XP → 升级三选一会挡住波次推进（update 冻结）；Digit1 随手选一张放行
+    const dismissLevelup = async () => {
+      const s = await b.snap();
+      if (s.state === 'levelup') { await b.page.keyboard.press('Digit1'); return true; }
+      return false;
+    };
+    await b.page.evaluate('window.NV_CHEAT.hp1()'); // 第 1 场速杀（bn=1 < ord.length=2 → 不翻胜局，brushCd=2.6）
+    for (let i = 0; i < 90; i++) { // 上限 45s：等第 2 场出场
+      if (await dismissLevelup()) { await b.page.waitForTimeout(150); continue; }
+      const s = await b.snap();
+      if (s.wave === 2 && s.boss) break;
+      if (s.state === 'over') throw new Error('第 1 场后误入结算（won=' + s.won + '）');
+      await b.page.waitForTimeout(500);
+    }
+    const mid = await b.snap();
+    assert.eq(mid.wave, 2, '第 2 场已出场');
+    assert.ok(mid.state === 'playing' || mid.state === 'levelup', '对局仍在进行');
+    await b.page.evaluate('window.NV_CHEAT.hp1()'); // 第 2 场速杀 → b.bn(2) >= ord.length(2) → winGame
+    for (let i = 0; i < 40; i++) { // 上限 20s：等结算（途中可能再弹升级选卡）
+      if (await dismissLevelup()) { await b.page.waitForTimeout(150); continue; }
+      if ((await b.snap()).state === 'over') break;
+      await b.page.waitForTimeout(500);
+    }
+    await b.page.waitForTimeout(600); // 留出可能的帧尾窗口：幻影若还有 spawn 通道就会在此显形
+    const sn = await b.snap();
+    assert.eq(sn.state, 'over', '20s 内进入结算');
+    assert.eq(sn.won, true, '连胜 2 场走真实胜利路径');
+    assert.eq(sn.wave, 2, '结算场次=2（不多记成 3）');
+    assert.eq(sn.boss, null, '结算屏无第 3 场幻影 BOSS');
+    assert.eq(sn.queue.length, 0, '无幻影出场队列残留');
+    const lb = JSON.parse(await b.page.evaluate('localStorage.getItem("neonvoid_lb") || "[]"'));
+    assert.ok(lb.length && lb[0].w === 2, '荣誉榜 rec.w=2，实得 ' + (lb.length ? lb[0].w : '无'));
+    await b.shot('brb-win2-settle-844x390');
+    assert.deep(b.errors, [], '无未捕获异常');
+    await b.ctx.close();
+  });
+  s.test('[R17-IBUF] 演出窗技能缓冲：升级三选一/波次闸窗内按技能键 → 窗末首帧原序释放（riftCd 落表即释放证据；[R19-MEMLOOP] 恢复）', async () => {
+    // ① 升级窗：xp() → levelup；窗内 KeyQ+KeyE 缓存（riftCd/odCd 仍 0 = 未误发）→ Digit1 选卡 →
+    //    回 playing 首帧双技能已释放（flushInBuf 挂在 playing 门首，释放延迟 1 帧 ≪ 100ms 预算）
+    const b0 = await boot(browser, base);
+    await startModeByKey(b0.page, '1'); // 经典
+    await b0.page.waitForTimeout(2200);
+    const tPress0 = Date.now();
+    await b0.page.evaluate('window.NV_CHEAT.xp()');
+    await b0.waitState('levelup');
+    await b0.page.keyboard.press('KeyQ');
+    await b0.page.keyboard.press('KeyE');
+    await b0.page.waitForTimeout(150);
+    const inWin = await b0.snap();
+    assert.eq(inWin.inBufN, 2, '升级窗内 Q/E 双键入缓冲（未误发）');
+    assert.ok(inWin.riftCd === 0 && inWin.odCd === 0, '窗内技能未执行（riftCd/odCd 仍 0）: ' + inWin.riftCd + '/' + inWin.odCd);
+    await b0.page.keyboard.press('Digit1'); // 选卡回 playing（双 pending 时会再弹一次 → 轮询放行）
+    for (let i = 0; i < 20; i++) {
+      if ((await b0.snap()).state === 'playing') break;
+      if ((await b0.snap()).state === 'levelup') await b0.page.keyboard.press('Digit1');
+      await b0.page.waitForTimeout(200);
+    }
+    await b0.waitState('playing', 8000);
+    const rel = await b0.snap();
+    assert.eq(rel.inBufN, 0, '回 playing 首帧缓冲清空（原序释放）');
+    assert.ok(rel.riftCd > 24 && rel.odCd > 24, '双技能窗末真实释放落表（满冷却 riftCd≈25/odCd≈30，释放延迟 ' + (Date.now() - tPress0) + 'ms 内）: ' + rel.riftCd + '/' + rel.odCd);
+    assert.deep(b0.errors, [], '无未捕获异常');
+    // ② 波次闸窗：Q 缓存（inBufN=1）→ Enter 放行 → playing 首帧释放（riftCd 落表）；
+    //    Space 在波次闸是「放行」语义不缓存（unit 静态断言钉住 bufSkill 的 wgate-Space 例外）
+    await b0.ctx.close();
+    const b1 = await boot(browser, base, { ls: { neonvoid_cfg: JSON.stringify({ wgate: 1 }) } });
+    await startModeByKey(b1.page, '1');
+    await b1.page.waitForTimeout(1000);
+    // 等第 1 波自然肃清 → 波次闸（wgate=1）：自动火力 4+1*2.4≈6 只杂兵，75s 预算
+    const dl0 = Date.now();
+    while (Date.now() - dl0 < 75000) {
+      const s = await b1.snap();
+      if (s.state === 'wgate') break;
+      if (s.state === 'levelup') { await b1.page.keyboard.press('Digit1'); await b1.page.waitForTimeout(200); continue; }
+      if (s.state === 'over') throw new Error('波闸等待期意外终局');
+      await b1.page.waitForTimeout(400);
+    }
+    assert.eq((await b1.snap()).state, 'wgate', '75s 内进波次闸（wgate=1 波间暂停）');
+    await b1.page.keyboard.press('KeyQ');
+    await b1.page.waitForTimeout(150);
+    const inGate = await b1.snap();
+    assert.eq(inGate.inBufN, 1, '波次闸窗内 Q 入缓冲');
+    await b1.page.keyboard.press('Enter'); // 放行下一波
+    await b1.waitState('playing', 8000);
+    const relGate = await b1.snap();
+    assert.eq(relGate.inBufN, 0, '放行后缓冲清空');
+    assert.ok(relGate.riftCd > 20, '裂缝在 playing 首帧真实释放（riftCd≈25 落表）: ' + relGate.riftCd);
+    assert.deep(b1.errors, [], '无未捕获异常');
+    await b1.ctx.close();
   });
 
   /* ================= [A11Y-CB] 色盲模式 ================= */
@@ -879,14 +985,16 @@ async function backToTitle(b, ms) {
       for (const bt of vb.btns) assert.ok(bt.tw >= 44 && bt.th >= 44, tag + '「' + bt.l + '」touch rect ' + bt.tw + '×' + bt.th + ' ≥44');
       await b.ctx.close();
     }
-    // ③ 行为验证（chips 视觉 h26）：chip 下缘外 6px 点按（外扩带 my=9 内、且不与上邻 chip 外扩矩形
-    // 交接——1px canvas 边框偏移会让「上缘外 2px」落入两 chip 最近边等距点，取先入表者）→ 设置页打开
+    // ③ 行为验证（chips 视觉 h26）：chip 下缘外点按（外扩带 my=9 内）→ 设置页打开。
+    // [R19-CRED] col1 扩为 4 行（行距 32：12/44/76/108）后，设置 chip 下缘 102..108 是与「关于」chip
+    // 的 6px 间隙带——点按取「距视觉矩形最近者」（pickTouchBtn 距离判定）：下缘外 2px 处
+    // d(set)=2 < d(关于)=4 确定性命中设置 chip；旧 +6px 落点恰为关于 chip 视觉上缘（d=0）会被夺走。
     const bc = await boot(browser, base);
     const vb0 = await bc.page.evaluate('window.NV_BTN()');
     const chip = vb0.btns.find(x => x.act === 'set');
     assert.ok(chip && chip.h < 44, '设置 chip 视觉高 ' + (chip ? chip.h : '?') + ' <44（依赖外扩命中）');
     assert.ok(chip.th >= 44, 'chip touch rect ' + chip.th + ' ≥44');
-    await bc.page.touchscreen.tap(Math.round(chip.x + chip.w / 2), Math.round(chip.y + chip.h + 6));
+    await bc.page.touchscreen.tap(Math.round(chip.x + chip.w / 2), Math.round(chip.y + chip.h + 2)); // [R19-CRED] 下缘外 2px：d(set)=2 < d(关于)=4 确定性命中（旧 +6px 落点恰为关于 chip 上缘）
     await bc.waitStage('set');
     // ④ 模式按钮外扩（844×390 压行后 ≈39 高 <44）：下缘外 2px 点按 → 进入选人页
     await bc.page.keyboard.press('Escape');
@@ -1452,6 +1560,106 @@ async function backToTitle(b, ms) {
     assert.deep(b4.errors, [], '无未捕获异常');
     await b4.ctx.close();
   });
+  s.test('[R17-GRAZEFX] 擦弹成功瞬间反馈闭环：gshotIn → grazes++ + 落点火花迸发像素（A/B 差分）· 预警环带仍在位', async () => {
+    const b = await boot(browser, base);
+    await startModeByKey(b.page, '7'); // 擦弹专精（开火封印 · 擦弹即得分）：grazes 断言面干净
+    await b.page.waitForTimeout(800);
+    const s0 = await b.snap();
+    assert.eq(s0.grazes, 0, '开局 grazes=0');
+    // A 帧：无火花基线 → B 帧：gshotIn 静止弹放进 0.8×grazeR → 下帧真实擦弹成功路径
+    const partsA = (await b.snap()).partsN; // 无火花基线
+    await b.page.evaluate('window.NV_CHEAT.gshotIn()'); // 静止弹放进 0.8×grazeR → 下帧真实擦弹成功
+    await b.page.waitForTimeout(150);
+    const sB = await b.snap();
+    assert.ok(sB.grazes >= 1, '擦弹成功计数（grazes 0→' + sB.grazes + '，预警环带内真实成功路径）');
+    assert.ok(sB.partsN > partsA, '落点火花迸发（粒子 ' + partsA + '→' + sB.partsN + '，L0 全效 8 向）');
+    // 成功音调节流窗：grzPingT 共享节流（0.06s 内多弹不爆音）——快照面无直接字段，unit 静态断言钉住源码
+    const sC = await b.snap();
+    assert.ok(sC.gz >= 0 && sC.gzRaw >= 0, '预警环带逼近度断言面仍在位（gz=' + sC.gz + '）');
+    assert.deep(b.errors, [], '无未捕获异常');
+    await b.ctx.close();
+  });
+  s.test('[R17-GLOW] 连杀里程碑边缘光晕：触发亮起+自然衰减 · 被压播报降级 toast（音画同步）· 色盲换板 · L1+ 跳过', async () => {
+    const b = await boot(browser, base);
+    await startModeByKey(b.page, '1'); // 经典
+    await b.page.waitForTimeout(1200);
+    assert.ok((await b.snap()).msGlowT === 0, '无里程碑时光晕窗为 0（事件驱动零常驻，默认外观不变）');
+    await b.page.evaluate('window.NV_CHEAT.mile(10)'); // 走真实 milestones()：×10 里程碑
+    await b.page.waitForTimeout(120);
+    const s1 = await b.snap();
+    assert.ok(s1.msGlowT > 0 && s1.msGlowT <= 0.9, '里程碑触发光晕窗亮起（msGlowT=' + s1.msGlowT + ' ∈ (0,0.9]）');
+    assert.ok(s1.msGlowC === '#ffc233', '默认里程碑光晕色 #ffc233: ' + s1.msGlowC);
+    // 自然衰减：decay 每帧递减，1.2s 后归零
+    await b.page.waitForTimeout(1200);
+    assert.ok((await b.snap()).msGlowT === 0, '光晕自然衰减归零（不滞留）');
+    assert.deep(b.errors, [], '无未捕获异常');
+    await b.ctx.close();
+    // ② 被压播报降级 toast（音画同步）：brb BOSS 出场横幅（prio 2，展开期 2.3s）压住里程碑
+    //    （prio 0）→ banner 返回 false → 降级 toast「连击大师 · ×10」补可视化，光晕照常
+    const bb = await boot(browser, base, { ls: { neonvoid_rush: JSON.stringify({ order: [0], tier: 0 }) } });
+    await bb.page.keyboard.press('b');
+    await bb.waitStage('brb');
+    await bb.page.keyboard.press('Enter');
+    await bb.waitState('playing');
+    for (let i = 0; i < 30; i++) { if ((await bb.snap()).boss) break; await bb.page.waitForTimeout(150); }
+    assert.ok((await bb.snap()).boss, 'BOSS 在场（出场名横幅 prio 2 播报中）');
+    await bb.page.evaluate('window.NV_CHEAT.mile(10)');
+    await bb.page.waitForTimeout(120);
+    const s2 = await bb.snap();
+    assert.ok(s2.msGlowT > 0, '光晕照常亮起（横幅压制不影响光晕）');
+    assert.ok(s2.qToast && s2.qToast.indexOf('连击大师') >= 0, '被压播报降级 toast 补可视化（音画同步）: ' + s2.qToast);
+    assert.deep(bb.errors, [], '无未捕获异常');
+    await bb.ctx.close();
+    // ② 色盲换板：cb=1 → msGlowC = CBPAL.graze 金黄
+    const bcb = await boot(browser, base, { ls: { neonvoid_cfg: JSON.stringify({ cb: 1 }) } });
+    await startModeByKey(bcb.page, '1');
+    await bcb.page.waitForTimeout(1000);
+    await bcb.page.evaluate('window.NV_CHEAT.mile(10)');
+    await bcb.page.waitForTimeout(100);
+    const scb = await bcb.snap();
+    assert.ok(scb.msGlowT > 0, '色盲模式光晕窗亮起');
+    assert.ok(scb.msGlowC === '#ffe233', '色盲换板 CBPAL.graze 金黄: ' + scb.msGlowC);
+    await bcb.ctx.close();
+    // ③ L1+ 跳过：锁 L2 → 光晕不亮（低档位省一笔全屏径向渐变），横幅/播报保留
+    const bl2 = await boot(browser, base, { ls: { neonvoid_cfg: JSON.stringify({ fx: 2 }) } });
+    await startModeByKey(bl2.page, '1');
+    await bl2.page.waitForTimeout(800);
+    await bl2.page.evaluate('window.NV_CHEAT.mile(10)');
+    await bl2.page.waitForTimeout(100);
+    const sl2 = await bl2.snap();
+    assert.eq(sl2.msGlowT, 0, 'L2 光晕跳过（低档仅承诺静态外的高级特效减载）');
+    await bl2.ctx.close();
+  });
+  s.test('[R17-MEM] 跨局记忆泄漏清零：经典局到过的连杀档不再让 BOSS 局里程碑哑火（G.ms 随局复位）', async () => {
+    // 局 A：经典局置连击 10 → 里程碑入 G.ms 去重表 → 结束
+    const ba = await boot(browser, base);
+    await startModeByKey(ba.page, '1');
+    await ba.page.waitForTimeout(1000);
+    for (let i = 0; i < 20; i++) { if ((await ba.snap()).state === 'playing') break; if ((await ba.snap()).state === 'levelup') await ba.page.keyboard.press('Digit1'); await ba.page.waitForTimeout(200); }
+    await ba.page.evaluate('window.NV_CHEAT.mile(10)');
+    await ba.page.waitForTimeout(100);
+    assert.ok((await ba.snap()).msGlowT > 0, 'A 局里程碑播报在位');
+    await ba.page.evaluate('window.NV_CHEAT.kill()'); // 速死走 recordScore → 结算
+    await ba.waitState('over', 15000);
+    await ba.page.waitForTimeout(1400); // 结算屏 CTA/输入门 G.over>0.7 解锁（立即按 T 会被门吃掉）
+    await ba.page.keyboard.press('KeyT'); // 回标题
+    await ba.waitStage('mode', 8000);
+    await ba.ctx.close();
+    // 局 B：BOSS 连战局同一连杀档（×10）必须重新播报+光晕（若 G.ms 未随局复位则哑火）
+    const bb = await boot(browser, base, { ls: { neonvoid_rush: JSON.stringify({ order: [0], tier: 0 }) } });
+    await bb.page.keyboard.press('b');
+    await bb.waitStage('brb');
+    await bb.page.keyboard.press('Enter');
+    await bb.waitState('playing');
+    await bb.page.waitForTimeout(800);
+    const glowBefore = (await bb.snap()).msGlowT;
+    await bb.page.evaluate('window.NV_CHEAT.mile(10)');
+    await bb.page.waitForTimeout(120);
+    const sb = await bb.snap();
+    assert.ok(sb.msGlowT > 0 && glowBefore === 0, 'B 局 ×10 里程碑重新亮起（G.ms 随局复位，跨局记忆泄漏清零）');
+    assert.deep(bb.errors, [], '无未捕获异常');
+    await bb.ctx.close();
+  });
   s.test('色盲模式 × FPS 降级组合矩阵：cb=1 下 L0→L1→L2→回升全链路（治理器 + 弹幕上限 + 色盲橙弹像素逐档核验）', async () => {
     // 治理器迁移钩子成对重发（同画质三档用例），色盲像素断言逐档重采——色盲换板与降档治理互不干扰
     const b = await boot(browser, base, { ls: { neonvoid_cfg: JSON.stringify({ cb: 1 }) } });
@@ -1777,6 +1985,90 @@ async function backToTitle(b, ms) {
       fsrv.srv.close();
       try { fs.rmSync(fixture, { recursive: true, force: true }); } catch (e) {}
     }
+  });
+
+  /* ================= [R18b] 特效交互收口回归：BOSS 态 toast 让位 ⏱ / 升级屏成就弹窗与经验条避让卡排 ================= */
+  s.test('[R18b-QT5] BOSS 血条在场 toast 让位 ⏱@48：⏱@37 字身像素 A/B 不被胶囊切（844×390）', async () => {
+    const b = await boot(browser, base);
+    await b.page.keyboard.press('3');
+    await b.page.waitForFunction('window.NV_SNAP().tStage === "players"', null, { timeout: 8000 });
+    await b.page.keyboard.press('1');
+    await b.waitState('playing');
+    await b.page.waitForFunction('!!window.NV_SNAP().boss', null, { timeout: 15000 });
+    await b.page.waitForTimeout(3600); // 出场演出（st=enter）结束 → 血条在场、⏱ 移到 37（drawTimer bossBar 分支）
+    const grabBand = `(() => {
+      const cv = document.querySelector('canvas'); const c2 = cv.getContext('2d');
+      const grab = (x, y, w, h) => { const d = c2.getImageData(x, y, w, h).data; let s = 0, mx = 0;
+        for (let i = 0; i < d.length; i += 4) { const v = (d[i]+d[i+1]+d[i+2])/3; s += v; if (v > mx) mx = v; }
+        return [ +(s/(d.length/4)).toFixed(1), mx ]; };
+      return grab;
+    })()`;
+    const timerOnly = await b.page.evaluate(`${grabBand}(382, 28, 120, 16)`); // 无 toast 基线：⏱ 字身带 28..44
+    await b.page.evaluate('window.NV_CHEAT.toast()');
+    await b.page.waitForFunction('window.NV_SNAP().qToast !== null', null, { timeout: 5000 });
+    await b.page.waitForTimeout(320); // 0.25s 淡入完成
+    const timerBand = await b.page.evaluate(`${grabBand}(382, 28, 120, 16)`); // 有 toast：胶囊让位 48，⏱ 带应保留字身亮度
+    const pillBand = await b.page.evaluate(`${grabBand}(332, 50, 180, 20)`);  // 胶囊新带 48..72 本体
+    assert.ok(timerBand[1] >= timerOnly[1] * 0.85, `⏱ 字身带不被胶囊切：max ${timerOnly[1]} → ${timerBand[1]}（≥85% 保留）`);
+    assert.ok(pillBand[1] > 150, '胶囊本体在 48..72 带可见（max=' + pillBand[1] + '）');
+    await b.shot('r18b-boss-toast48');
+    assert.deep(b.errors, [], '无未捕获异常');
+    await b.ctx.close();
+  });
+  s.test('[R18b-ACH2] 升级屏成就弹窗整窗暂隐 → 选卡续播 + [R18b-XPB] 844×320 经验条避让卡排（844×390 对照保留）', async () => {
+    const grabBand = `(() => {
+      const cv = document.querySelector('canvas'); const c2 = cv.getContext('2d');
+      const grab = (x, y, w, h) => { const d = c2.getImageData(x, y, w, h).data; let s = 0, mx = 0;
+        for (let i = 0; i < d.length; i += 4) { const v = (d[i]+d[i+1]+d[i+2])/3; s += v; if (v > mx) mx = v; }
+        return [ +(s/(d.length/4)).toFixed(1), mx ]; };
+      return grab;
+    })()`;
+    // ① 844×390：真实 unlock() → playing 弹窗亮 → xp() 进 levelup 弹窗带熄灭（暂隐）→ 选卡回 playing 续播
+    const b = await boot(browser, base);
+    await startModeByKey(b.page, '1');
+    await b.page.evaluate('window.NV_CHEAT.unlock()');
+    await b.page.waitForFunction('window.NV_SNAP().achPopN === 1', null, { timeout: 5000 });
+    await b.page.waitForTimeout(500); // 弹窗 0.35s 滑入动画完成（x 从屏外滑到 W-210）
+    const popVisible = await b.page.evaluate(`${grabBand}(684, 145, 130, 45)`); // 面板带（playing 应亮）
+    assert.ok(popVisible[1] > 90, 'playing 态成就弹窗可见（max=' + popVisible[1] + '）');
+    await b.page.evaluate('window.NV_CHEAT.xp()');
+    await b.waitState('levelup');
+    await b.page.waitForTimeout(250);
+    assert.eq((await b.snap()).achPopN, 1, 'levelup 内弹窗仍在（[R18b-ACH2] 计时冻结不空转消失）');
+    const popHidden = await b.page.evaluate(`${grabBand}(684, 145, 130, 45)`); // levelup 应暗（整窗暂隐）
+    assert.ok(popHidden[1] < 60, 'levelup 态弹窗带熄灭（暂隐，max=' + popHidden[1] + '）');
+    await b.shot('r18b-levelup-achpop-hidden');
+    await b.page.keyboard.press('1'); // 选卡回 playing → 弹窗从冻结点续播
+    await b.waitState('playing');
+    await b.page.waitForTimeout(200);
+    const popResumed = await b.page.evaluate(`${grabBand}(684, 145, 130, 45)`);
+    assert.ok(popResumed[1] > 90, '选卡后弹窗续播（max=' + popResumed[1] + '）');
+    assert.deep(b.errors, [], '无未捕获异常');
+    await b.ctx.close();
+    // ② 844×320（vert 极端收缩）：levelup 经验条暂隐（xpBarN=0 直读 + 选卡回 playing 恢复真绘）；
+    //    844×390 横排对照：levelup 条带像素可见 + xpBarN=1
+    const b2 = await boot(browser, base, { vp: { width: 844, height: 320 } });
+    await startModeByKey(b2.page, '1');
+    assert.eq((await b2.snap()).xpBarN, 1, '320 对局态经验条真绘');
+    await b2.page.evaluate('window.NV_CHEAT.xp()');
+    await b2.waitState('levelup');
+    await b2.page.waitForTimeout(300);
+    assert.eq((await b2.snap()).xpBarN, 0, '844×320 升级屏经验条避让卡排（xpBarN=0 暂隐；条带整段被卡面板覆盖，像素不可隔离 → 直读真绘旗）');
+    await b2.shot('r18b-levelup-320-xpbar-yield');
+    await b2.page.keyboard.press('1'); // 选卡回 playing → 经验条恢复
+    await b2.waitState('playing');
+    await b2.page.waitForTimeout(150);
+    assert.eq((await b2.snap()).xpBarN, 1, '320 选卡后经验条恢复真绘');
+    assert.deep(b2.errors, [], '无未捕获异常');
+    await b2.ctx.close();
+    const b3 = await boot(browser, base); // 844×390 对照（横排卡布局净空充足 → 不触发避让）
+    await startModeByKey(b3.page, '1');
+    await b3.page.evaluate('window.NV_CHEAT.xp()');
+    await b3.waitState('levelup');
+    await b3.page.waitForTimeout(300);
+    assert.eq((await b3.snap()).xpBarN, 1, '844×390 升级屏经验条保留（xpBarN=1；levelup 时 xp 已入 pending，条体只剩低α轨道 → 像素断言不可靠，直读真绘旗）');
+    assert.deep(b3.errors, [], '无未捕获异常');
+    await b3.ctx.close();
   });
 
   const r = await s.run();

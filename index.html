@@ -124,6 +124,7 @@ const G = {
   waveQueue: [], waveDelay: 0, inter: 0, cleared: false,
   slow: 1, slowT: 0, hitstop: 0, shake: 0, flash: 0, chroma: 0,
   deadT: 0, gzBeepT: 0, hudHurtT: 0, hudShieldT: 0,
+  inBuf: [], msGlowT: 0, msGlowC: '', grzPingT: 0, // [R17-IBUF] 演出窗技能键缓冲 · [R17-GLOW] 连杀里程碑边缘光晕窗 · [R17-GRAZEFX] 擦弹成功音节流（[R19-MEMLOOP] 第 18 轮陈旧基线合并误回退，本轮恢复）
   time: 0, runT: 0, over: 0, muted: false, ms: []
 };
 const player = { x: 400, y: 250, vx: 0, vy: 0, ix: 0, iy: 0, a: 0, r: 11, inv: 0, dashT: 0, dashCd: 0, dashA: 0, fireT: 0, spawnT: 0, gz: 0, gzV: 0 };
@@ -723,12 +724,39 @@ function pad2(t, semis) {
    才顶掉旧横幅——BOSS 名横幅展开到一半被「连击大师」踩掉的老毛病由此清零。 */
 function banner(m, s, c, small, prio) {
   const pr = prio == null ? 1 : prio;
-  if (G.banner && G.banner.prio > pr && G.banner.t < G.banner.d * 0.5) return;
+  if (G.banner && G.banner.prio > pr && G.banner.t < G.banner.d * 0.5) return false; // [R17-AVSYNC] 让位时返回 false，调用方可补可视化保音画同步（[R19-MEMLOOP] 恢复）
   G.banner = { m, s, c: c || '#4de3ff', t: 0, d: small ? 1.5 : 2.3, small: !!small, prio: pr };
+  return true;
 }
 /* [ELEG8-TOAST] 轻量通知统一走顶部小胶囊 toast()（与画质档位提示同一绘制管线 drawQToast）：
    原先散落的 addText 定位文案（复制成功/失败、海报失败等）各自挑 y 落点，风格与位置都不统一。 */
 function toast(msg, c) { G.qToast = { t: 0, msg, c: c || '#9fdcff' }; }
+function hexA(hx, a) { // '#rrggbb' → rgba() 串（[R17-GLOW] 边缘光晕渐变用）
+  const n = parseInt(hx.slice(1), 16);
+  return 'rgba(' + (n >> 16) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a.toFixed(3) + ')';
+}
+/* [R17-GLOW] 连杀里程碑屏幕边缘光晕：里程碑瞬间四周亮起一道柔和辉光（0.9s 衰减 + 轻脉动）。
+   纯表现层、事件驱动——无里程碑时零绘制，默认外观逐像素不变。尊重降级：
+   色盲模式换 CBPAL.graze 金黄（黄-蓝轴全色觉可读，与擦弹环带同板）；画质 L1/L2 直接跳过
+   （全屏径向渐变是低档位最贵的一笔，纯装饰为流畅度让路）。（[R19-MEMLOOP] 恢复） */
+function msGlow(c) {
+  if (G.tier >= 1) return;
+  G.msGlowT = 0.9;
+  G.msGlowC = CFG.cb === 1 ? CBPAL.graze : (c || '#ffc233');
+}
+function drawMsGlow() {
+  if (!(G.msGlowT > 0) || G.tier >= 1 || G.state === 'title') return;
+  const k = G.msGlowT / 0.9;
+  const a = 0.20 * k * (0.78 + 0.22 * Math.sin(G.time * 9));
+  const g = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.36, W / 2, H / 2, Math.max(W, H) * 0.72);
+  g.addColorStop(0, hexA(G.msGlowC || '#ffc233', 0));
+  g.addColorStop(1, hexA(G.msGlowC || '#ffc233', a));
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = 1;
+}
 /* [PERF-L] 画质档位：L0 全效 → L1 粒子减半+辉光/星云减载 → L2 弹幕上限 400→300+背景静态化。
    只动表现层预算（粒子/辉光/星云/弹幕池上限），弹幕数据格式、战报、悬赏码完全不受档位影响。
    自动档（CFG.fx=0）由主循环的 FPS 治理器驱动：<40fps 持续 10 秒降一档，≥55fps 持续 20 秒回升
@@ -842,10 +870,14 @@ function rollCards() {
     // 纵排卡内容条（侧条 y+8 / 标题 y+22 / 描述 y+46）在 ch≥56 时仍完整可读。
     const bottomLine = H - 12 - SAFE.b; // 卡块 + 间距14 + 重抽钮(30) 的底缘预算
     if (cy0 + 3 * ch + 2 * cgap + 44 > bottomLine) {
-      cgap = 8;
+      cgap = 6;
       ch = Math.max(56, Math.floor((bottomLine - cy0 - 44 - 2 * cgap) / 3));
       if (cy0 + 3 * ch + 2 * cgap + 44 > bottomLine) {
-        cy0 = Math.max(H * 0.15 + 40, bottomLine - (3 * ch + 2 * cgap + 44));
+        // [R19-QT4] 卡排顶钳位 0.15H+40 → +48：旧钳位下 844×320 首卡上缘(88)被 levelup toast
+        // 胶囊带(0.15H+22..+46，R18-QT3 副标题让位带)盖住 6px（实测卡内区 y 88..92 亮度 16≈
+        // 胶囊暗体、应亮 34.9；胶囊底描边 y93-94 压在卡描边上）。+48 让首卡上缘 ≥ 胶囊带底+2，
+        // 行距 12→8 同步收紧保 card3↔重抽钮 4px 空隙；844×320 实测三卡 96/158/220+重抽 280 无叠穿。
+        cy0 = Math.max(H * 0.15 + 48, bottomLine - (3 * ch + 2 * cgap + 44));
       }
     }
   } else if (H < 560) {
@@ -1136,7 +1168,10 @@ function startGame(gmode, pmode) {
   G.dispScore = 0; G.cardT = 0; G.fade = 1; G.prevRiftCd = 0; G.prevOdCd = 0; G.rerolls = 2;
   G.boss = null; G.banner = null; G.waveQueue = []; G.cleared = false;
   G.slow = 1; G.slowT = 0; G.hitstop = 0; G.shake = 0; G.flash = 0;
-  G.deadT = 0; G.gzBeepT = 0; G.hudHurtT = 0; G.hudShieldT = 0; // [R15-DEATH][R15-HUD] 演出/反馈窗复位
+  G.deadT = 0; G.gzBeepT = 0; G.hudHurtT = 0; G.hudShieldT = 0; G.grzPingT = 0; // [R15-DEATH][R15-HUD][R17-GRAZEFX] 演出/反馈窗复位
+  G.ms = []; G.waveDmg = false; // [R17-MEM] 里程碑去重表/无伤旗随局复位（[R19-MEMLOOP] 恢复）——startWave 之外的形态（boss/brb/versus/ghost）
+  // 原本继承上一局的值：上一局到过的连杀档让 boss/brb 局里程碑播报整段哑火，上一局挨过打则
+  // grazeboss 无伤解锁永久失效（跨局记忆泄漏，与 [R17-PHANTOM] 场次多记同源：不走过 startWave 的态字段）
   player.gz = 0; player.gzV = 0; player2.gz = 0; player2.gzV = 0; // [R15-GRAZE] 预警环带逼近度复位
   G.runT = 0; G.over = 0; G.newHi = false;
   G.won = false; G.brush = 0; G.brushCd = 0; G.lbRank = 0; G.waveKind = 'n';
@@ -1152,6 +1187,7 @@ function startGame(gmode, pmode) {
   if (G.bossBoomQ) G.bossBoomQ.length = 0; else G.bossBoomQ = []; // [R18-BOOM] 分帧爆散队列绝不跨局滞留
   G.rec = { px: [], py: [], bx: [], by: [], eb: [] }; G.rcF = 0;
   G.waveGrz = 0;
+  G.inBuf.length = 0; G.msGlowT = 0; // [R17-IBUF][R17-GLOW] 缓冲技能与里程碑光晕窗绝不跨局滞留
   // 连战构建器：快照本局用的自定义菜单（结算/成就判定不受构建器后续改动影响）；未配置时给默认全 6 BOSS
   G.rushRun = gmode === 'brb'
     ? (G.rush && G.rush.order && G.rush.order.length ? G.rush : { order: [0, 1, 2, 3, 4, 5], tier: 0 })
@@ -1244,6 +1280,7 @@ function goTitle() {
   G.deadT = 0; G.hudHurtT = 0; G.hudShieldT = 0; // [R15-DEATH] 演出窗绝不跨局滞留
   G.waveScanT = 0; // [R18-SCAN] 转场引信不跨态滞留
   if (G.bossBoomQ) G.bossBoomQ.length = 0; // [R18-BOOM] 波次闸 T 回标题不带出未爆完的分帧爆散
+  G.inBuf.length = 0; G.msGlowT = 0; // [R17-IBUF][R17-GLOW] 波次闸按 T 回标题不带出缓冲技能/残留光晕
   // [FIX-MEM1] 结算资源只在结算屏有消费：回标题立即释放，死亡快照不再滞留整个标题期
   G.endSnap = null; G.chainCode = null; autopsyCache = null;
   G.state = 'title'; G.tStage = 'mode';
@@ -2166,8 +2203,13 @@ function milestones() {
     if (G.combo >= m && G.ms.indexOf(m) < 0) {
       G.ms.push(m);
       // [R15-RHYTHM] 里程碑是低优先级播报（prio 0）：BOSS 出场名横幅/狂暴提示在播时不再被踩掉
-      banner(MILES[i][1], MILES[i][2] + ' · ×' + G.combo, '#ffc233', true, 0);
+      // [R17-AVSYNC] 音画同步核查结论：banner+sfxMile 原本同帧同步调用（音画对齐✓），但横幅被
+      // 高优先级播报（BOSS 出场名/核心摧毁）压住让位时音效仍独奏 → 有声无画。让位时降级走顶部
+      // toast 胶囊（独立绘制位不踩横幅），同帧仍有可见反馈，音画重新对齐。（[R19-MEMLOOP] 恢复）
+      const shown = banner(MILES[i][1], MILES[i][2] + ' · ×' + G.combo, '#ffc233', true, 0);
+      if (!shown) toast(MILES[i][1] + ' · ×' + G.combo, '#ffc233');
       G.chroma = Math.max(G.chroma, 0.55);
+      msGlow('#ffc233'); // [R17-GLOW] 连杀里程碑屏幕边缘光晕（色盲模式换板/FPS 降档减载）
       sfxMile(i + 1);
     }
   }
@@ -3108,10 +3150,22 @@ function updEBullets(dt) {
             }
             if (G.grazes >= 600) unlock('graze2k');
           } else addScore(5);
-          for (let gi = 0; gi < 3; gi++) {
-            const ga = R(0, TAU), gsp = R(40, 160);
+          // [R17-GRAZEFX] 擦弹成功瞬间反馈升级（预警环带 → 完整反馈闭环的收口）：原 3 枚小火花太弱且无声。
+          // 现为 8 向火花迸发 + 扩散冲击环 + 成功音调——音高随连段微升，与预警期上行音阶（540+700·gz）
+          // 形成「逼近渐强 → 擦过收束」的听感闭环。尊重降级：L1/L2 迸发减半且跳过冲击环；色盲模式
+          // 随 CBPAL.graze 换板（与预警环带同色，闭环视觉一致）。同帧多弹擦弹由 grzPingT 0.06s 节流防爆音。
+          // （[R19-MEMLOOP] 恢复：第 18 轮陈旧基线合并误回退为 3 枚静默火花）
+          const gzc = CFG.cb === 1 ? CBPAL.graze : '#ffe233';
+          const gn = G.tier >= 1 ? 4 : 8;
+          for (let gi = 0; gi < gn; gi++) {
+            const ga = R(0, TAU), gsp = R(120, 380);
             parts.push({ type: 1, x: b.x, y: b.y, vx: Math.cos(ga) * gsp, vy: Math.sin(ga) * gsp,
-              life: R(0.1, 0.25), ml: 0.25, c: '#ffe233', sz: 1.2, drag: 3 });
+              life: R(0.15, 0.38), ml: 0.38, c: gi % 3 ? gzc : '#ffffff', sz: 1.6, drag: 2.6 });
+          }
+          if (G.tier < 1) parts.push({ type: 2, x: b.x, y: b.y, vx: 0, vy: 0, rad: 3, vr: 260, life: 0.22, ml: 0.22, c: gzc, sz: 1.8, drag: 0 });
+          if (G.grzPingT <= 0) {
+            G.grzPingT = 0.06;
+            tone('triangle', 920 + Math.min(560, G.combo * 6), 1480 + Math.min(400, G.combo * 4), 0.09, 0.065);
           }
           break;
         }
@@ -3242,6 +3296,13 @@ function updOrbs(dt) {
   }
 }
 function waveLogic(dt) {
+  // [R17-PHANTOM] 局内翻态守卫：hitBoss→finishBoss→winGame 在 update 中途就把 state 翻成 'over'，
+  // 但 update 尾部仍会调一次 waveLogic——此时 boss=null、弹/雷/标记/队列已被 winGame 清空、
+  // brushCd 因上一场出场时未复位而 ≤0 → 同帧 spawn 第 N+1 场幻影 BOSS，结算「迎战场次」多记一场
+  // （G.wave/G.brush 被 +1，BOSS 名横幅盖住「全灭达成」）。update() 只在 playing 态进入（frame 门），
+  // 此守卫唯一过滤的就是这种局内翻态后的帧尾残留，不影响任何正常推进。
+  // [R19-MEMLOOP] 第 18 轮陈旧基线合并把本守卫误回退，遗留池 low 项因此复发——本轮恢复。
+  if (G.state !== 'playing') return; // [R17-PHANTOM]
   if (G.mode === 'versus' || G.mode === 'ghost') return;
   if (G.deadT > 0) return; // [R15-DEATH] 死亡演出窗：冻结波次推进（最后一杀与死亡同帧时不再弹波次闸/开新波）
   if (G.mode === 'boss' || G.mode === 'brb') {
@@ -3297,6 +3358,7 @@ function decay(dt) {
   G.flash = Math.max(0, G.flash - dt * 2.2);
   G.chroma = Math.max(0, G.chroma - dt * 2.2);
   G.fade = Math.max(0, G.fade - dt * 2);
+  G.msGlowT = Math.max(0, G.msGlowT - dt); // [R17-GLOW] 里程碑边缘光晕窗衰减（暂停/选卡窗内也继续，不滞留）
   G.dispScore = LP(G.dispScore, G.score, 1 - Math.exp(-8 * dt));
   if (G.waveScanT > 0) G.waveScanT = Math.max(0, G.waveScanT - dt); // [R18-SCAN] 0.3s 引信
   // [R18-DEPTH] 网格深呼吸（纯表现层）：每 6s(L1 减频 12s) 从随机点推开一圈软波，
@@ -3396,6 +3458,7 @@ function update(dt) {
   // [R15-GRAZE] 擦弹时间窗·反馈段：逼近度平滑（指数趋近，弹幕高速掠过时不闪烁）+
   // 音调提示——音高/音量随逼近度上行（贴得越近音越尖），~0.11s 节流防连续擦弹时爆音。
   // 静音/音频未就绪由 tone() 自身闸门兜底，这里只管节流与复位。
+  if (G.grzPingT > 0) G.grzPingT -= dt; // [R17-GRAZEFX] 擦弹成功音节流窗（G 级共享节流，放船循环里会被双人逐船双扣）
   for (const sh of ships()) {
     sh.gzV = LP(sh.gzV, sh.gz, 1 - Math.exp(-14 * dt));
     if (sh.gz > 0.12) {
@@ -4360,6 +4423,17 @@ function drawTouchUI() {
   }
 }
 function drawXPBar() {
+  // [R18b-XPB] 升级屏（vert 纵排卡布局：W<620 || H<367）极端收缩后卡块底缘越过经验条带
+  // （844×320 实测卡 3 底 276 vs 条带 266..271 整段被不透明卡面板盖住；599×374 窄窗 316 vs 315
+  // 压 1px）——条/LV/+N 全部不可读，升级屏暂隐经验条（选卡即回，xp 在选卡时本就重置）；
+  // 横排卡布局（844×390 / 桌面）卡底与条带净空 ≥44px，不受影响。
+  // G.xpBarDrawn = 本帧是否真绘（[R18b-XPB] e2e 断言面：NV_SNAP.xpBarN 直读，像素无法隔离时兜底）
+  G.xpBarDrawn = false;
+  if (G.state === 'levelup' && G.cards.length) {
+    const lc = G.cards[G.cards.length - 1];
+    if (lc.y + lc.h > H - 54 - SAFE.b - 6) return;
+  }
+  G.xpBarDrawn = true;
   const bw = Math.min(260, W * 0.36), bx = W / 2 - bw / 2, by = H - 54 - SAFE.b;
   ctx.globalAlpha = 0.22; ctx.fillStyle = '#4dfff0';
   ctx.fillRect(bx, by, bw, 5);
@@ -4466,6 +4540,11 @@ function drawSingularity() {
 function drawAchPop() {
   const p2 = G.achPop;
   if (!p2) return;
+  // [R18b-ACH2] 升级三选一期间整窗暂隐：矮视口（H<560）弹窗落 140（[R15-FIX4]）恰在横排卡带
+  // （顶 H*0.15+46，844×390 卡 3 = 521..679 × 104..287）之内——面板左半 45px 滑入卡 3 之下、
+  // 「成就解锁」标签前两字被盖（844×390 实测截图取证）。计时同步冻结（见主循环 achPop.t 门），
+  // 选卡回 playing 后从暂停点继续播完，解锁反馈不丢。
+  if (G.state === 'levelup') return;
   const t = p2.t;
   const inn = Math.min(1, t / 0.35);
   const out = t > 2.9 ? CL((3.4 - t) / 0.5, 0, 1) : 1;
@@ -4474,10 +4553,11 @@ function drawAchPop() {
   // [ELEG8-ACHPOP] 矮视口（横屏手机 H<560）结算屏上 RANK 字母区在 H*0.545±29 ≈ 183-241，
   // 弹窗 y=142 高 54 → 底缘 196 压住 RANK 字母顶部 → 矮视口抬到 92（底缘 146，让出字母区）；
   // 桌面 RANK 在更下方（H*0.545 远大于 196），保持 142 原位。
-  // [R15-FIX4] 对局态（含暂停/升级/波次闸，HUD 在场）矮视口弹窗改落 140：原 92 档正好盖住
+  // [R15-FIX4] 对局态（含暂停/波次闸，HUD 在场）矮视口弹窗改落 140：原 92 档正好盖住
   // 顶右生命图标（y≈92）与炸弹图标行（y≈114）——drawAchPop 在 drawHUD 之后画，面板整块压在
   // 图标上 3.4s。140 落在 HUD 角落（至 ~128）之下、右中带空档，横幅带（0.3H±20）不相交。
-  const inGame = G.state === 'playing' || G.state === 'paused' || G.state === 'levelup' || G.state === 'wgate';
+  // （levelup 已在上方 [R18b-ACH2] 整窗暂隐，不在 inGame 集内。）
+  const inGame = G.state === 'playing' || G.state === 'paused' || G.state === 'wgate';
   const ay0 = H < 560 ? (inGame ? 140 : 92) : 142;
   ctx.save();
   ctx.globalAlpha = out;
@@ -4533,6 +4613,10 @@ function drawBanner() {
    · levelup → 桌面(H≥560) 40（大标题顶 H*0.15-20 ≥ 64 不相交）；矮视口落副标题带 H*0.15+22：
      844×390 的升级态中轴被 计时器(⏱ y7-19)/大标题(y38-79)/卡排(顶 H*0.15+46) 挤满，
      副标题带是唯一整段空档，胶囊出现期间副标题让位不画（drawOverlay levelup 分支同标记）；
+   · [R18b-QT5] BOSS 血条在场时 → 48：drawTimer 在 bossBar 分支把 ⏱ 移到 37（textBaseline=middle，
+     11px 字身 ≈ y30.5..43.5），胶囊顶缘 40 会切掉数字下缘 ~3.5px（844×390 BOSS 连战实测基线
+     亮度 88.1→70.1）。48 落在 ⏱ 字身之下 4.5px，距波次闸标题（H*0.545-78，844×320 = 96）与
+     BOSS 出场横幅（0.3H±20）上缘仍有 ≥9px 净空。
    · 标题/结算无顶部 HUD，维持 12。描边/文字色随 toast 类型（q.c）。 */
 function drawQToast() {
   const q = G.qToast;
@@ -4542,7 +4626,11 @@ function drawQToast() {
   const w2 = Math.ceil(ctx.measureText(q.msg).width) + 30;
   let y0 = 12;
   if (G.state === 'levelup') y0 = H < 560 ? H * 0.15 + 22 : 40;
-  else if (G.state === 'playing' || G.state === 'paused' || G.state === 'wgate') y0 = 40;
+  else if (G.state === 'playing' || G.state === 'paused' || G.state === 'wgate') {
+    // [R18b-QT5] bossBar 判据与 drawTimer 同源：血条在场 ⇒ ⏱@37，胶囊落 48 让出 ⏱ 字身
+    const bossBar = G.boss && G.boss.dying == null && G.boss.st !== 'enter';
+    y0 = bossBar ? 48 : 40;
+  }
   const x0 = W / 2 - w2 / 2, yy0 = y0 + SAFE.t;
   ctx.save();
   ctx.globalAlpha = a * 0.95;
@@ -4772,7 +4860,7 @@ function drawOverlay() {
       ctx.shadowBlur = 0;
       const cl = [
         ['NEON VOID · 霓虹虚空', 22, '#eaf6ff', 800],
-        ['v1.5.7 · 单文件 · 零依赖 · ~320KB', 12, 'rgba(170,200,235,.8)', 600],
+        ['v1.5.8 · 单文件 · 零依赖 · ~350KB', 12, 'rgba(170,200,235,.8)', 600],
         ['v1.0.2 修复：无尽模式高波次白屏 · 超频射控失效 · 屏幕外残敌卡波', 11, 'rgba(120,230,190,.85)', 600],
         ['v1.0.3 平衡：高波次难度曲线（数量↑ / 血量封顶）· 帧循环微调', 11, 'rgba(120,230,190,.85)', 600],
         ['v1.1.0 扩充：奇点之瞳降临 · 双螺旋/镜面折返弹幕 · 超导闪现/虚空结晶/擦弹领域', 11, 'rgba(120,230,190,.85)', 600],
@@ -4785,7 +4873,9 @@ function drawOverlay() {
         ['v1.5.3 收官：设置页极矮视口让位（9 行不压返回钮）· 旧档/四码迁移矩阵 · 5 分钟 monkey 压力', 11, 'rgba(120,230,190,.85)', 600],
         ['v1.5.4 打磨：触屏 hover 白圈清零 · 小窗页眉/logo 让位 · 分享码口径补全 · 结算屏可回主界面', 11, 'rgba(120,230,190,.85)', 600],
         ['v1.5.5 手感：擦弹预警环带+音调提示 · 死亡慢动作渐隐 · BOSS 出场演出 · 连杀播报节奏 · HUD 受击反馈 · 小窗叠印清零', 11, 'rgba(120,230,190,.85)', 600],
+        ['v1.5.6 记忆与手感：连胜结算幻影 BOSS/场次多记清零 · 演出窗技能缓冲 · 擦弹成功火花+音调闭环 · 连杀里程碑边缘光晕 · 跨局状态泄漏清零', 11, 'rgba(120,230,190,.85)', 600],
         ['v1.5.7 特效与进程：背景深度动画三档降级 · BOSS 分帧爆散 · 残影数据流 · 扫描线转场 · toast 避让与升级卡排矮横屏收编', 11, 'rgba(120,230,190,.85)', 600],
+        ['v1.5.8 记忆闭环：恢复被第 18 轮误回退的 v1.5.6 全部成果（幻影 BOSS 守卫/擦弹火花音调/里程碑光晕/演出窗缓冲/失焦抬手）· 失焦漏 keyup 清键 · 关于页纯触屏入口 · 极矮屏升级卡排让位 toast · BOSS 态 toast 让位 ⏱ · 升级屏成就弹窗/经验条避让卡排', 11, 'rgba(120,230,190,.85)', 600],
         ['', 10, '', 400],
         ['设计 · 代码 · 美术 · 音乐', 14, '#dfeeff', 700],
         ['全部由 AI 通过 VIBECODING 创作', 14, '#ff7ad9', 700],
@@ -5089,7 +5179,7 @@ function drawOverlay() {
     // 页脚基线在 H-14 直接从按钮下穿过 → 这些自绘子页一律让位不画页脚（各自已有返回按钮/页内提示）
     if (G.tStage !== 'brb' && G.tStage !== 'ach' && G.tStage !== 'set' && G.tStage !== 'guide' &&
         G.tStage !== 'credits' && G.tStage !== 'ghost' && G.tStage !== 'duel' && G.tStage !== 'duelres') {
-      txt('P 暂停 · M 静音 · A 成就 · G 指南 · S 设置 · C 关于 · B 构建器 · NEON VOID v1.5.7', cx, H - 14, 10, 'rgba(140,170,210,.4)', 'center', 500, true);
+      txt('P 暂停 · M 静音 · A 成就 · G 指南 · S 设置 · C 关于 · B 构建器 · NEON VOID v1.5.8', cx, H - 14, 10, 'rgba(140,170,210,.4)', 'center', 500, true);
     }
   } else if (G.state === 'levelup') {
     ctx.fillStyle = 'rgba(3,5,16,.8)';
@@ -5471,6 +5561,7 @@ function render() {
   }
   drawSingularity();
   postFX();
+  drawMsGlow(); // [R17-GLOW] 连杀里程碑边缘光晕（事件驱动，窗内才画）
   // [R18-SCAN] 波次切换扫描线转场（0.3s）：亮带自上而下扫过战场（前缘亮线 + 错位回扫线 +
   // 半透明扫过带），给「新波次数据写入」的仪式感。startWave 三条路径（开局/清波/波间闸继续）
   // 共用同一引信；alpha 走 sin(pπ) 包络，首尾帧全透明无跳变。绘制在 HUD 之下——转场扫战场，
@@ -5770,14 +5861,18 @@ function titleBtns() {
     const y0 = H * 0.455;
     const avail = H * 0.90 - SAFE.b - y0;
     if (rows * (bh + gap) - gap > avail) { gap = 6; bh = Math.max(30, Math.floor((avail - (rows - 1) * gap) / rows)); }
-    /* [ELEG8-IA] 顶右 chip 改为固定双列三行：col1 = 成就/指南/设置（h26），col2 = 构建器/种子对决/
+    /* [ELEG8-IA] 顶右 chip 固定双列：col1 = 成就/指南/设置/关于（h26），col2 = 构建器/种子对决/
        残影悬赏（h32 + 分组副标题）。旧版残影码在场时会把种子对决 chip 推到第三列（W-382），
        844 宽下左缘 462 深入大 logo 字身（logo 右端 ≈ cx+130）；固定双列后 chip 最左 = W-256，
-       永远在 logo 右侧，杜绝「chip 压 logo」。分组副标题让 chip 也带上 IA 分组。 */
+       永远在 logo 右侧，杜绝「chip 压 logo」。分组副标题让 chip 也带上 IA 分组。
+       [R19-CRED] col1 补第 4 行「✨ 关于」chip：关于页此前只有键盘 C 一条入口（R16 低危遗留
+       「关于页无纯触屏入口」）——纯触屏设备从此可达版本履历/changelog；844×320 档 col1 底
+       134 < 模式页眉 0.435H=139 的字身（水平带不相交），44px 外扩命中由既有 touchRect 管线覆盖。 */
     const chips = [
       { x: W - 130 - SAFE.r, y: 12 + SAFE.t, w: 118, h: 26, act: 'ach', l: '🏆 成就 ' + G.ach.length + '/' + ACHV.length, c: COL.gold, f: 11 },
       { x: W - 130 - SAFE.r, y: 44 + SAFE.t, w: 118, h: 26, act: 'guide', l: '📖 玩法指南 · G', c: COL.cyan, f: 11 },
       { x: W - 130 - SAFE.r, y: 76 + SAFE.t, w: 118, h: 26, act: 'set', l: '⚙ 设置 SETTINGS', c: '#9fdcff', f: 11 },
+      { x: W - 130 - SAFE.r, y: 108 + SAFE.t, w: 118, h: 26, act: 'credits', l: '✨ 关于 CREDITS', c: '#b46bff', f: 11 },
       { x: W - 256 - SAFE.r, y: 12 + SAFE.t, w: 118, h: 32, act: 'brb', l: '🛠 连战构建器', s: MODE_GROUPS.adv[0], sc: MODE_GROUPS.adv[1], c: '#38c8ff', f: 11, f2: 11, fs: 9 },
       { x: W - 256 - SAFE.r, y: 48 + SAFE.t, w: 118, h: 32, act: 'duel', l: '⚔ 种子对决', s: MODE_GROUPS.ritual[0], sc: MODE_GROUPS.ritual[1], c: COL.orange, f: 11, f2: 11, fs: 9 }
     ];
@@ -5911,6 +6006,32 @@ function titleAct(a) {
   uiClick();
   startGame(G.tSel, a === 'pcoop' ? 'coop' : 'solo');
 }
+/* [R17-IBUF] 演出窗输入缓冲：升级三选一/波次闸这类「马上恢复行动」的窗内按下的技能键不再被
+   state 门吞掉，先缓存（原序，容量 6 防异常刷键），窗一结束回 playing 首帧原序释放执行——
+   释放延迟 1 帧（≈16ms，远小于 100ms 释放预算），选卡时不断的手指节奏在回场瞬间接上。
+   死亡演出窗/暂停/结算不缓存：那几个窗的语义是刻意封操作（[R15-FIX2]），缓存反成误触。
+   释放走原 castRift/useBomb 等函数，自带冷却/蓄能门：过期的重复键自然空转不会双发。
+   （[R19-MEMLOOP] 恢复：第 18 轮陈旧基线合并误回退） */
+const SKILL_KEYS = { Space: 1, KeyQ: 1, KeyE: 1, KeyX: 1, ShiftLeft: 1, ShiftRight: 1 };
+function bufSkill(code) {
+  if (G.state !== 'levelup' && G.state !== 'wgate') return false;
+  if (!SKILL_KEYS[code]) return false;
+  if (G.state === 'wgate' && code === 'Space') return false; // 波次闸里 Space=放行下一波，交回 wgateAct 不缓存
+  if (G.inBuf.length < 6) G.inBuf.push(code);
+  return true;
+}
+function flushInBuf() { // [R17-IBUF] 回 playing 首帧释放（frame 门里调用）
+  if (!G.inBuf.length) return;
+  const buf = G.inBuf;
+  G.inBuf = [];
+  for (const c of buf) {
+    if (c === 'Space') useBomb();
+    else if (c === 'KeyQ') castRift();
+    else if (c === 'KeyE') castOD();
+    else if (c === 'KeyX') castUltra();
+    else tryDash();
+  }
+}
 function handleKey(code) {
   if (code === 'KeyM') {
     G.muted = !G.muted;
@@ -5942,6 +6063,7 @@ function handleKey(code) {
     else if (G.state === 'paused') setPause(false);
     return;
   }
+  if (bufSkill(code)) return; // [R17-IBUF] 升级/波次闸窗内技能键：缓存待窗末释放
   if (code === 'Space' && G.state === 'playing' && G.deadT <= 0) { useBomb(); return; } // [R15-FIX2] 同上：本体已爆不再消费炸弹
   if (code === 'KeyQ') { castRift(); return; }
   if (code === 'KeyE') { castOD(); return; }
@@ -6175,11 +6297,16 @@ cv.addEventListener('contextmenu', (e) => e.preventDefault());
 window.addEventListener('blur', () => {
   if (G.state === 'playing') setPause(true);
   keys.clear();
+  joy.id = null; joy.dx = 0; joy.dy = 0; // [R17-KEYUP] 失焦抬手事件收不到：按住的摇杆一并松开，防回来后飞船漂移
 });
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
     if (G.state === 'playing') setPause(true);
     if (AC && AC.state === 'running') { try { AC.suspend(); } catch (e) {} }
+    // [R17-KEYUP] 与 blur 同款清键：隐藏期间 keyup 全部丢失（blur 不总伴随触发，如移动端切应用），
+    // 不清则回前台后按住的移动键/技能键永久卡住；按住的触屏摇杆同步松开
+    keys.clear();
+    joy.id = null; joy.dx = 0; joy.dy = 0;
   }
 });
 
@@ -6227,7 +6354,8 @@ function frame(now) {
   }
   if (G.qToast) { G.qToast.t += RDT; if (G.qToast.t > 2.6) G.qToast = null; }
   if (G.banner) { G.banner.t += RDT; if (G.banner.t >= G.banner.d) G.banner = null; }
-  if (G.achPop) { G.achPop.t += RDT; if (G.achPop.t > 3.4) G.achPop = null; }
+  // [R18b-ACH2] levelup 窗内弹窗计时冻结（drawAchPop 同步整窗暂隐）：选卡回 playing 从暂停点续播
+  if (G.achPop && G.state !== 'levelup') { G.achPop.t += RDT; if (G.achPop.t > 3.4) G.achPop = null; }
   if (G.state === 'over') G.over += RDT;
   // [R15-DEATH] 死亡演出倒计时（真实时间）：归零时还在 playing 才进正式结算——演出窗内
   // 若残弹打出 finishBoss→winGame 抢先翻 state，则尊重胜局不再覆盖
@@ -6248,7 +6376,7 @@ function frame(now) {
   try {
     if (G.hitstop > 0) { G.hitstop -= RDT; render(); return; }
     if (G.slowT > 0) { G.slowT -= RDT; if (G.slowT <= 0) G.slow = 1; }
-    if (G.state === 'playing') update(RDT * G.slow);
+    if (G.state === 'playing') { flushInBuf(); update(RDT * G.slow); } // [R17-IBUF] 窗末首帧先释放缓冲技能再推进世界
     else if (G.state !== 'paused' && G.state !== 'levelup') updateAmbient(RDT);
     else { decay(RDT); updTexts(RDT); } // [FIX-5] 暂停/升级时不更新世界，但闪光等特效必须继续衰减；[R18-PAUSE1] 浮字同时走完生命周期——旧版冻结的战斗浮字整段叠在暂停 UI 上直到解除暂停
     // [R15-FIX3] 死亡演出窗内捡到经验不再弹升级三选一：levelup 翻态会让 deadT 归零时
@@ -6429,7 +6557,14 @@ window.NV_SNAP = () => ({
   waveScanT: Math.round((G.waveScanT || 0) * 1000) / 1000,
   bossBoomN: G.bossBoomQ ? G.bossBoomQ.length : 0,
   gridWaveT: Math.round((G.gridWaveT || 0) * 1000) / 1000,
-  partsN: parts.length, pmax: PMAX(), textsN: texts.length
+  partsN: parts.length, pmax: PMAX(), textsN: texts.length,
+  // [R17-IBUF][R17-GLOW][R17-GRAZEFX] 断言面（[R19-MEMLOOP] 恢复）：riftCd=裂缝 CD（缓冲释放证据）·
+  // inBufN=演出窗缓冲深度 · msGlowT/msGlowC=里程碑边缘光晕窗与取色 · grazes/combo=擦弹数与连击（成功反馈断言用）
+  riftCd: Math.round(G.riftCd * 1000) / 1000, odCd: Math.round(G.odCd * 1000) / 1000, inBufN: G.inBuf.length,
+  msGlowT: Math.round(G.msGlowT * 1000) / 1000, msGlowC: G.msGlowC || '',
+  achPopN: G.achPop ? 1 : 0, // [R18b-ACH2] 断言面：成就弹窗在场（levelup 暂隐/续播断言用，t 不外露）
+  xpBarN: G.xpBarDrawn ? 1 : 0, // [R18b-XPB] 断言面：本帧经验条真绘（升级屏避让卡排时 0）
+  grazes: G.grazes, combo: G.combo
 });
 window.NV_BTN = () => { // [A11Y-T44] 只读按钮矩形：rect=视觉矩形，touch=触屏实际生效的 44px 外扩矩形（与命中共用 touchRect）
   let list;
@@ -6455,6 +6590,8 @@ window.NV_CHEAT = {
   highNow: () => { G.tHigh = 20.01; G.tLow = 0; }, // 直接满足回升持时
   kill: () => { G.lives = 1; hurtShip(player); }, // 测试专用速死走 recordScore（验证 dstat/成就/结算链路）
   combo: n => { G.combo = n; G.comboT = 0.01; }, // [R15-RHYTHM] 测试专用：置连击立即超时（连杀中断播报断言用）
+  mile: n => { G.combo = n; milestones(); }, // [R17-GLOW] 测试专用：置连击直接走真实 milestones()（里程碑光晕/音画同步断言用，绕开等待自然连击的时序竞态）
+  unlock: k => unlock(k || 'firststrike'), // [R18b-ACH2] 测试专用：走真实 unlock() 投放成就弹窗（levelup 暂隐/续播断言用，生产路径零调用）
   hp1: () => { if (G.boss) G.boss.hp = 1; },     // 测试专用：残影/连战 BOSS 血量置 1（走真实受击死亡→winGame 路径）
   pk: k => { // 测试专用：投放到离敌我实体最远的候选点的拾取物（色盲拾取调色板断言用）
     const spots = [[W / 2, H * 0.25], [W * 0.2, H * 0.25], [W * 0.8, H * 0.25], [W * 0.35, H * 0.25], [W * 0.65, H * 0.25]];
@@ -6491,6 +6628,12 @@ window.NV_CHEAT = {
     }
     eb(best[0], best[1], 0, 0, 5, '#ff5577');
     return [Math.round(best[0]), Math.round(best[1])];
+  },
+  gshotIn: () => { // 测试专用：[R17-GRAZEFX] 静止杂兵弹放进擦弹半径内（0.8×grazeR）——下一帧即走真实
+    // 擦弹成功路径（grazes++ / 火花迸发 / 成功音调），成功瞬间反馈闭环断言用。
+    const gr = (G.grazeR || 32) * 0.8;
+    eb(CL(player.x + gr, 24, W - 24), player.y, 0, 0, 5, '#ff5577');
+    return [Math.round(CL(player.x + gr, 24, W - 24)), Math.round(player.y)];
   },
   tier: () => G.tier
 };
