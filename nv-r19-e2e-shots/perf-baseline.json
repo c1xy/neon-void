@@ -1,0 +1,277 @@
+{
+ "env": {
+  "node": "v24.16.0",
+  "viewport": "844x390",
+  "dpr": 1,
+  "date": "2026-11-19T16:19:30.989Z"
+ },
+ "boot": [
+  {
+   "form": "classic",
+   "ready": "playing",
+   "snapMs": 616,
+   "bootMs": 728
+  },
+  {
+   "form": "endless",
+   "ready": "playing",
+   "snapMs": 581,
+   "bootMs": 716
+  },
+  {
+   "form": "boss",
+   "ready": "playing",
+   "snapMs": 504,
+   "bootMs": 650
+  },
+  {
+   "form": "chaos",
+   "ready": "playing",
+   "snapMs": 340,
+   "bootMs": 463
+  },
+  {
+   "form": "daily",
+   "ready": "playing",
+   "snapMs": 324,
+   "bootMs": 451
+  },
+  {
+   "form": "versus",
+   "ready": "playing",
+   "snapMs": 341,
+   "bootMs": 460
+  },
+  {
+   "form": "graze",
+   "ready": "playing",
+   "snapMs": 341,
+   "bootMs": 467
+  },
+  {
+   "form": "ghost",
+   "ready": "ghost",
+   "snapMs": 302,
+   "bootMs": 308
+  },
+  {
+   "form": "brb",
+   "ready": "brb",
+   "snapMs": 596,
+   "bootMs": 674
+  },
+  {
+   "form": "duel",
+   "ready": "duel",
+   "snapMs": 623,
+   "bootMs": 729
+  },
+  {
+   "form": "duelres",
+   "ready": "duelres",
+   "snapMs": 449,
+   "bootMs": 460
+  }
+ ],
+ "heap": {
+  "startMB": 3.49,
+  "endGCMB": 3.83,
+  "growthMB": 0.34,
+  "samples": [
+   {
+    "t": 0,
+    "mb": 3.49
+   },
+   {
+    "t": 5,
+    "mb": 3.58
+   },
+   {
+    "t": 10,
+    "mb": 3.55
+   },
+   {
+    "t": 15,
+    "mb": 3.93
+   },
+   {
+    "t": 20,
+    "mb": 3.31
+   },
+   {
+    "t": 25,
+    "mb": 4.52
+   },
+   {
+    "t": 30,
+    "mb": 4.5
+   }
+  ]
+ },
+ "swOfflineMs": 39,
+ "marathon": {
+  "games": 10,
+  "heapStartMB": 2.75,
+  "heapEndGCMB": 3.65,
+  "growthMB": 0.9,
+  "samples": [
+   {
+    "game": "start",
+    "mb": 2.75
+   },
+   {
+    "game": "classic",
+    "mb": 3.65
+   },
+   {
+    "game": "endless",
+    "mb": 4.16
+   },
+   {
+    "game": "boss",
+    "mb": 3.62
+   },
+   {
+    "game": "chaos",
+    "mb": 3.9
+   },
+   {
+    "game": "graze",
+    "mb": 4.33
+   },
+   {
+    "game": "versus",
+    "mb": 3.76
+   },
+   {
+    "game": "daily",
+    "mb": 5.01
+   },
+   {
+    "game": "duel",
+    "mb": 4.39
+   },
+   {
+    "game": "ghost",
+    "mb": 3.66
+   },
+   {
+    "game": "brb",
+    "mb": 4.9
+   }
+  ],
+  "pageerrors": 0,
+  "perGame": [
+   {
+    "tag": "classic",
+    "mode": "classic",
+    "score": 200,
+    "wave": 1,
+    "kills": 1,
+    "levels": 0,
+    "gates": 0,
+    "ms": 4398
+   },
+   {
+    "tag": "endless",
+    "mode": "endless",
+    "score": 100,
+    "wave": 1,
+    "kills": 1,
+    "levels": 0,
+    "gates": 0,
+    "ms": 4255
+   },
+   {
+    "tag": "boss",
+    "mode": "boss",
+    "score": 0,
+    "wave": 1,
+    "kills": 1,
+    "levels": 0,
+    "gates": 0,
+    "ms": 4289
+   },
+   {
+    "tag": "chaos",
+    "mode": "chaos",
+    "score": 400,
+    "wave": 1,
+    "kills": 1,
+    "levels": 0,
+    "gates": 0,
+    "ms": 4236
+   },
+   {
+    "tag": "graze",
+    "mode": "graze",
+    "score": 0,
+    "wave": 1,
+    "kills": 1,
+    "levels": 0,
+    "gates": 0,
+    "ms": 4259
+   },
+   {
+    "tag": "versus",
+    "mode": "versus",
+    "score": 15,
+    "wave": 0,
+    "kills": 1,
+    "levels": 0,
+    "gates": 0,
+    "ms": 4273
+   },
+   {
+    "tag": "daily",
+    "mode": "daily",
+    "score": 400,
+    "wave": 1,
+    "kills": 1,
+    "levels": 0,
+    "gates": 0,
+    "ms": 4250
+   },
+   {
+    "tag": "duel",
+    "mode": "duel",
+    "score": 200,
+    "wave": 1,
+    "kills": 1,
+    "levels": 0,
+    "gates": 0,
+    "ms": 4029
+   },
+   {
+    "tag": "ghost",
+    "mode": "ghost",
+    "score": 0,
+    "wave": 4,
+    "kills": 1,
+    "levels": 0,
+    "gates": 0,
+    "ms": 4004
+   },
+   {
+    "tag": "brb",
+    "mode": "brb",
+    "score": 0,
+    "wave": 1,
+    "kills": 1,
+    "levels": 0,
+    "gates": 0,
+    "ms": 3954
+   }
+  ],
+  "offlineMs": 64
+ },
+ "swUpgrade": {
+  "old": "neon-void-upg-old",
+  "new": "neon-void-upg-new",
+  "takeoverMs": 2808,
+  "keys": [
+   "neon-void-upg-new"
+  ],
+  "docNew": true
+ }
+}

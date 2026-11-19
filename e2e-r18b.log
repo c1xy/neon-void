@@ -1,0 +1,69 @@
+  ✓ boot：模式「classic」（键盘 1 → 单人出击）
+  ✓ boot：模式「endless」（键盘 2 → 单人出击）
+  ✓ boot：模式「boss」（键盘 3 → 单人出击）
+  ✓ boot：模式「chaos」（键盘 4 → 单人出击）
+  ✓ boot：模式「daily」（键盘 5 → 单人出击）
+  ✓ boot：模式「versus」（键盘 6 → 单人出击）
+  ✓ boot：模式「graze」（键盘 7 → 单人出击）
+  ✓ boot：残影悬赏页（#bounty= 载入 → 残影 BOSS 在场）
+  ✓ boot：连战构建器页（B → Enter 出击自定义连战）
+  ✓ boot：种子对决构建页（主界面 chip 点击进入）
+  ✓ boot：对决结果页（#duelres= 载入 → 待你开卷）
+  ✓ 四码路径 #bounty=：wave/score/lv/chain → ghostStats 血量吻合
+  ✓ 四码路径 #rush=：order/tier → 出场序列直达构建器确认页并入局
+  ✓ 四码路径 #duel=：seed/cap/lv → duelRun 快照逐字段吻合
+  ✓ 四码路径 #duelres=：新档案建档待战 + 同档案合并判定（w/l/t 三态）
+  ✓ 每日挑战同日确定性：两次开局 dseed / 词条 / 波次构成一致
+  ✓ 画质三档：手动锁档（cfg fx=1→L0 / fx=2→L2）+ NV_CHEAT 治理器降档/回升
+  ✓ R18 特效开关：星野漂移/网格深呼吸 L0 开 → L2 冻结（低档仅静态）+ 扫描线转场 0.3s
+  ✓ R18 toast 避让落点（844×390）：levelup 落副标题带且不被状态遮罩压暗（绘制层级后移）
+  ✓ R18 BOSS 分帧爆散：队列逐波引信（峰值 ≤ 粒子预算）+ 残影死亡数据流字符流
+  ✓ 种子对决全链路：构建→码→开局→成绩码→对决史→判胜负
+  ✓ 昨日之影：昨日采样注入 → 开局召唤回放 → 本机采样落盘 → 结算对比
+  ✓ ghost 胜局实机：hp1 辅助 → 真实受击死亡 → winGame → 残影讨伐结算
+  ✓ brb 胜局实机：hp1 辅助 → 通关自定义连战 → 全灭达成结算
+  ✓ 色盲模式：默认关 + 默认弹幕/拾取物像素原生色 · 开启后杂兵弹橙/BOSS 弹蓝菱/拾取物换板 + 设置页记忆
+  ✓ 触屏 44px：全阶段按钮 touch rect ≥44 实测（NV_BTN）+ chips/模式/结算/重抽钮外扩点按行为验证
+  ✓ 触屏完整一局（844×390 仿真）：鼠标 hover 白圈→触屏清除（像素实测）· 摇杆/技能/升级选卡/波次闸/结算重启全触屏路径 · 零 pageerror
+  ✓ monkey：5 分钟随机点击/按键/摇杆注入 + 间歇 resize/visibility 切换 — 零 pageerror · 进程存活 · 可退回标题
+  ✓ 设置页实机：scan/shake 开关语义往返 + 高亮像素落在「开」+ 行盒不交叠 + 9 行不压返回钮
+  ✓ 对决构建页实机：档位按钮带 →「波次上限」标签 → 初始构筑标题，亮像素剖面三段分离
+  ✓ 存档迁移实机：v1 悬赏码 + 旧 lb/dstat/duels/shadow 一包旧档 → 零异常加载 + 自愈就位 + 对局落盘迁移
+  ✓ 手感层回归：擦弹预警环带（默认/色盲金带）· 死亡演出窗（deadT + 窗内禁暂停）· BOSS 出场镜头与血条受击白影 · 连杀中断播报
+  ✓ 色盲模式 × FPS 降级组合矩阵：cb=1 下 L0→L1→L2→回升全链路（治理器 + 弹幕上限 + 色盲橙弹像素逐档核验）
+  · boot classic  346ms(snap) / 471ms(ready)
+  · boot endless  350ms(snap) / 462ms(ready)
+  · boot boss     365ms(snap) / 507ms(ready)
+  · boot chaos    369ms(snap) / 495ms(ready)
+  · boot daily    364ms(snap) / 496ms(ready)
+  · boot versus   342ms(snap) / 463ms(ready)
+  · boot graze    369ms(snap) / 490ms(ready)
+  · boot ghost    304ms(snap) / 308ms(ready)
+  · boot brb      375ms(snap) / 439ms(ready)
+  · boot duel     344ms(snap) / 444ms(ready)
+  · boot duelres  327ms(snap) / 331ms(ready)
+  ✓ 性能基线：10 形态逐一 boot ≤2s（导航起 → 形态就绪，逐形态采样）
+  · heap 30s：2.98MB → 3.96MB（GC 后），增长 0.98MB
+  ✓ 性能基线：对局 30s JS heap 增长 ≤5MB（classic 实机 + CDP 强制 GC 双端采样）
+  · SW 离线启动 39ms（state=title）
+  ✓ 性能基线：SW 离线启动 ≤3s（先在线装 SW → 断网重载 → NV_SNAP 就绪）
+  · 第 1/10 局 classic  score=    100  wave=1  kills=1 levels=0  4.3s
+  · 第 2/10 局 endless  score=    200  wave=1  kills=1 levels=0  4.5s
+  · 第 3/10 局 boss     score=      0  wave=1  kills=1 levels=0  4.5s
+  · 第 4/10 局 chaos    score=    400  wave=1  kills=1 levels=0  4.2s
+  · 第 5/10 局 graze    score=      0  wave=1  kills=1 levels=0  4.2s
+  · 第 6/10 局 versus   score=     15  wave=0  kills=1 levels=0  4.2s
+  · 第 7/10 局 daily    score=    400  wave=1  kills=1 levels=0  4.2s
+  · 第 8/10 局 duel     score=    200  wave=1  kills=1 levels=0  3.9s
+  · 第 9/10 局 ghost    score=      0  wave=4  kills=1 levels=0  4.0s
+  · 第 10/10 局 brb      score=      0  wave=1  kills=1 levels=0  4.0s
+  · heap：2.74MB → 3.58MB（GC 后），10 局增长 0.85MB
+  · 压测后 SW 离线启动 62ms（基线套件 39ms，state=title）
+  ✓ 连局压测：同一页面连续 10 局（10 形态抽 6 + 每日 + 种子对决 + 补抽 2 形态）— 零 pageerror · heap ≤8MB · SW 离线 ≤3s 不劣化
+  · SW 升级接管 2864ms（旧缓存已清；缓存/网络/导航三路资源=新版）
+  ✓ SW 升级路径：旧版缓存接管 → 发布新版 → skipWaiting 接管后缓存/网络/导航三路资源全部为新版
+
+[e2e] 38 passed, 0 failed, 38 total (593038ms)
+
+性能基线 → nv-r18b-e2e-shots\perf-baseline.json
+截图/工件目录: ./nv-r18b-e2e-shots
