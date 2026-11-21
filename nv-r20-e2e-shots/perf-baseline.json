@@ -1,0 +1,13 @@
+{
+ "env": {
+  "node": "v24.16.0",
+  "viewport": "844x390",
+  "dpr": 1,
+  "date": "2026-11-21T09:31:24.170Z"
+ },
+ "boot": [],
+ "heap": null,
+ "swOfflineMs": null,
+ "marathon": null,
+ "swUpgrade": null
+}

@@ -1,0 +1,189 @@
+
+========== unit ==========
+$ D:\node.exe tests/unit.test.js
+  ✓ bounty v3 往返：普通值逐字段一致
+  ✓ bounty v3 往返：全字段极值（wave 65535 / score 16777215 / grazes 65535 / chain 250）
+  ✓ bounty v3 卡等级按卡 max 收口（火力强化 max 5 → 入码 7 回读 5）
+  ✓ bounty 码固定 32 字符 base64url
+  ✓ bounty 旧码 v1/v2 仍可解析（缺省卡位视为 0）
+  ✓ bounty 坏码拒绝：XOR 校验坏 / 长度错 / 版本错 / 非法字符 / 空串
+  ✓ bounty 裸 hash（无 #bounty= 前缀的旧链接）仍可解析
+  ✓ rush 往返：全 6 BOSS 序列 + 地狱档
+  ✓ rush 往返：单 BOSS + 标准档
+  ✓ rush 序号/档位入码时收口（9→5、tier 3→2）
+  ✓ rush 坏码拒绝：空序列 / 长度不符 / XOR 坏 / 版本错 / 非法字符
+  ✓ rushValid 形状校验
+  ✓ duel 往返：seed u32（含 >2^31）/ 卡等 / 波次上限
+  ✓ duel 卡等按卡 max 收口、cap 收口 1..99（cap 缺省/0 走 ||10 默认）
+  ✓ duel 码固定 28 字符
+  ✓ duel 坏码拒绝：尾部拼 junk / XOR 坏 / 长度错 / 版本错 / 非法字符
+  ✓ duelSeedText 八位大写十六进制
+  ✓ duelres 往返：得分 u24 / 波次 / won 标志 / 评级
+  ✓ duelres 往返：全零 + won=false + 未知评级回落 D
+  ✓ duelres 极值：score 16777215 / wave 255 / cap 99
+  ✓ duelres 坏码拒绝
+  ✓ 互斥：#rush= 码喂给 bounty/duel/duelres 解析器 → 全部 null
+  ✓ 互斥：#duel= 码喂给 bounty/rush/duelres 解析器 → 全部 null
+  ✓ 互斥：#duelres= 码喂给 bounty/rush/duel 解析器 → 全部 null
+  ✓ 互斥：#bounty= 码喂给 rush/duel/duelres 解析器 → 全部 null
+  ✓ 互斥：非码 hash（普通锚点/空 hash/杂串）四解析器全 null
+  ✓ RSTATE：同 seed 两次播种 → 1000 位序列逐位一致
+  ✓ RSTATE：不同 seed → 序列分化；全部落在 [0,1)
+  ✓ RSTATE：seed 0 边界可用
+  ✓ RSTATE：RG/RGI 落界内；RGI 含端点
+  ✓ dailySeed：同日恒定、跨日变化、32 位
+  ✓ dstat 连续天数：last=昨天 → +1
+  ✓ dstat 连续天数：last=前天（断签）→ 从 1 重起
+  ✓ dstat 连续天数：last=今天 → 不动（同日多局只计一次）
+  ✓ dstat 连续天数：last=今天但 streak 异常归零 → 修复为 1
+  ✓ dstat 连续天数：首局（空档）→ 1
+  ✓ sanitizeDstat：坏形状自愈（streak 收口 3660 / 非日期形状清空 / best 变形归零）
+  ✓ dstat 落盘段：今日最佳与最长连击随成绩刷新
+  ✓ setTier：0↔2 直达 / 同档 no-op / 越界收口 / q 映射与弹幕上限
+  ✓ 画质治理器（真实源码切片）：低帧 10s 逐级降档 L0→L1→L2，L2 兜底不再降
+  ✓ 画质治理器：高帧 20s 逐级回升 L2→L1→L0，方向感知提示
+  ✓ 画质治理器：40~55 观望带不动作且清零计时；非对局（title）不计量
+  ✓ 画质治理器：手动「高/低」锁档（CFG.fx=1 → L0；CFG.fx=2 → L2）
+  ✓ 画质档位不影响玩法数据：档位切换不触碰 RSTATE
+  ✓ overTitle 六形态逐一核对
+  ✓ CFGS 开关语义（[R20-CFG] 改版）：二值行 o[1]=「开」· shake 三档回填=强 · bgm/se 滑条无 o · mute 行收编
+  ✓ setGeom 全视口扫描 H=300..900（11 行）：行盒不交叠、不压副标题/返回按钮/榜块标题
+  ✓ 存档迁移矩阵 ① 悬赏码 v1（19 字节 9 卡布局）：hash 页面路径兼容 + ghostStats 下游可消费
+  ✓ 存档迁移矩阵 ② 悬赏码 v2（22 字节 12 卡布局）：hash 页面路径兼容 + ghostStats 下游可消费
+  ✓ 存档迁移矩阵 ③ 裸 hash 旧悬赏链接（无 #bounty= 前缀的历史分享形态）仍可加载
+  ✓ 存档迁移矩阵 ④ rush/duel/duelres v1 布局（历史唯一版本）：可解 + 未知版本拒绝自愈
+  ✓ 存档迁移矩阵 ⑤ 旧荣誉榜（neonvoid_lb）：v1.3 时代行缺 m/c → loadLB 补全；坏形状 → 整表重置 + removeItem 自愈
+  ✓ 存档迁移矩阵 ⑥ dstat v1.4 早期形态：缺 mcombo/best.c/best.t → sanitizeDstat 补全 4 字段
+  ✓ 存档迁移矩阵 ⑦ shadow 历史形态：缺 v 字段/条目缺 sc·w/NaN 样本/超窗口 → sanitizeShadow 自愈
+  ✓ 存档迁移矩阵 ⑧ duels 旧行缺字段：me/opp/res/deck/t 补全 + cap 收口 + 12 条封顶
+  ✓ 存档迁移矩阵 ⑨ 旧档仅含 mute/shake 布尔字段：migrateCfg → 双滑条映射 + 新代档原样信任
+
+[unit] 56 passed, 0 failed, 56 total (106ms)
+
+  ✓ 对决确认页宣传语含完整口径「同码同卷同词条同随机流（升级三选一同池，序列随对局节奏）」
+  ✓ 复制对决链接 toast 文案含完整口径
+  ✓ [R14-PROMO] 分享链接宣传语三处统一完整口径（#bounty=/#rush= 补全，样板=#duel=）
+  ✓ 结算底部三行统一让位（[FIX-COS13]+[FIX-COS13b]+[R15-LAY2]）：stackFits 预算 + ctaY 受 btnY-31 钳制 + 提示行随 CTA、可整行让位
+  ✓ NV_CHEAT.hp1 钩子存在（残影/BOSS 血量置 1 走真实死亡路径）
+  ✓ [FIX-DUEL1] 对决构建页「波次上限」标签与档位按钮行呼吸间距 ≥10px，网格双侧几何一致
+  ✓ [FIX-GEOM1]+[R13-GEOM1]+[R20-CFG] setGeom compact 行高 16 / 桌面 22 / crowd 档 14 与行距下限持平 + 榜块让位判定提前 8px
+  ✓ [R13-SW] 发版纪律：sw.js CACHE 版本与 index.html 版本串同步递增
+  ✓ [R14-HOV] hover 白圈判定带 mouse.inside 门 + 触屏事件同步清 hover 态
+  ✓ [R14-OVER] 结算屏「⌂ 主界面」钮在位（触屏可达 goTitle，同键盘 T/波次闸 ⌂）
+  ✓ [R14-LOGO1] 小窗（H<560）× 页眉 ≤0.425H 的标题页（players/ach/set/ghost）跳过大 logo
+  ✓ [R14-COPY] 设置页副标题去同义反复 + 分享链接宣传语三处完整口径
+  ✓ [R15-LAY1] mode/players 页榜块让位：modeHonFit 与模式卡几何同源 + playersHintY 收口
+  ✓ [R15-HUD] modeTag 统一来源 + BOSS 血条白影/命中白闪 + 生命图标红闪 + 连杀播报节奏
+  ✓ [R15-FIX2/3] 死亡演出窗状态闸：禁暂停/禁技能/禁升级翻态 + 演出窗复位清单
+  ✓ [R15-FIX1/4] 小窗叠印清零：KILLCAM 标签让位按钮带 + 成就弹窗矮视口对局态让位 HUD
+  ✓ [R15-CHEAT] 测试钩子：combo 注入（连杀播报断言）与 gshot（环带断言）在位
+  ✓ [R16-COS] 关于页 ⚡ 矮视口让位兜底：不高于正文流末位（旧 min(H*0.84,…) 把 ⚡ 钳回最后一行叠印）
+  ✓ [R18-QT3] toast 避让：落点按态分支 + 绘制层级后移到 drawOverlay 之后（levelup/wgate/paused 不再被罩暗/大标题压住）
+  ✓ [R18-LV2] 升级卡排矮横屏收编：极矮(H<367)复用纵排 + 367≤H<560 压缩卡高钳出副标题带
+  ✓ [R18-DEPTH] 背景深度动画三档降级：星野漂移/星云视差/网格深呼吸 L2 全冻结（低档仅静态）
+  ✓ [R18-BOOM][R18-DSTREAM] BOSS 分帧爆散队列 + 残影死亡数据流：引信双路径推进 + 粒子预算内
+  ✓ [R18-WG1] 波次闸矮视口节奏：波段/标题/副标题/战绩行全部相对按钮带定位（叠字/穿钮清零）
+  ✓ [R18-PAUSE1] 暂停屏矮视口压缩：构筑/M-F 行不再压经验条与技能键位标签 + 浮字随暂停走完生命周期
+  ✓ [R18-ACH1] 成就网格两级收缩：chh<24 转紧凑单行卡（末行裁切/压返回钮/卡内双行互叠清零）
+  ✓ [R17-PHANTOM] waveLogic 局内翻态守卫在位（连胜结算幻影 BOSS/场次多记清零；R18 误回退后由 [R19-MEMLOOP] 恢复）
+  ✓ [R17-IBUF] 演出窗输入缓冲：bufSkill 缓存 / flushInBuf 窗末首帧释放 / startGame·goTitle 清空
+  ✓ [R17-GRAZEFX] 擦弹成功反馈闭环：迸发+冲击环+成功音调，L1/L2 减载、色盲换板、共享节流
+  ✓ [R17-GLOW] 连杀里程碑边缘光晕：事件驱动零常驻 + 色盲换板 + L1/L2 跳过 + decay 衰减
+  ✓ [R19-MEMLOOP] 第 18 轮陈旧基线合并误回退的 v1.5.6 成果全量恢复 + R18 成果共存无损
+  ✓ [R19-QT4] 极矮屏升级卡排让位 toast 胶囊带：vert 卡排顶钳位 +48 / 行距 8→6（844×320 首卡被胶囊盖 6px 清零）
+  ✓ [R19-CRED] 关于页纯触屏入口：mode 页 col1 第 4 行「✨ 关于 CREDITS」chip（R16 低危「关于页无纯触屏入口」清零）
+  ✓ [R18b-QT5] BOSS 血条在场 toast 让位 ⏱@37：bossBar 判据与 drawTimer 同源（⏱ 字身 30.5..43.5 不被胶囊顶缘 40 切）
+  ✓ [R18b-ACH2] 升级屏成就弹窗整窗暂隐：drawAchPop levelup 早退 + 主循环计时冻结（选卡后从暂停点续播）
+  ✓ [R18b-XPB] 升级屏经验条避让卡排：vert 极端收缩卡底压条带时暂隐（选卡即回，横排/桌面不受影响）
+
+[unit:static] 35 passed, 0 failed, 35 total (8ms)
+
+UNIT TOTAL: 91 passed, 0 failed, 91 tests
+
+========== e2e ==========
+$ D:\node.exe tests/e2e.test.js
+  ✓ boot：模式「classic」（键盘 1 → 单人出击）
+  ✓ boot：模式「endless」（键盘 2 → 单人出击）
+  ✓ boot：模式「boss」（键盘 3 → 单人出击）
+  ✓ boot：模式「chaos」（键盘 4 → 单人出击）
+  ✓ boot：模式「daily」（键盘 5 → 单人出击）
+  ✓ boot：模式「versus」（键盘 6 → 单人出击）
+  ✓ boot：模式「graze」（键盘 7 → 单人出击）
+  ✓ boot：残影悬赏页（#bounty= 载入 → 残影 BOSS 在场）
+  ✓ boot：连战构建器页（B → Enter 出击自定义连战）
+  ✓ boot：种子对决构建页（主界面 chip 点击进入）
+  ✓ boot：对决结果页（#duelres= 载入 → 待你开卷）
+  ✓ 四码路径 #bounty=：wave/score/lv/chain → ghostStats 血量吻合
+  ✓ 四码路径 #rush=：order/tier → 出场序列直达构建器确认页并入局
+  ✓ 四码路径 #duel=：seed/cap/lv → duelRun 快照逐字段吻合
+  ✓ 四码路径 #duelres=：新档案建档待战 + 同档案合并判定（w/l/t 三态）
+  ✓ 每日挑战同日确定性：两次开局 dseed / 词条 / 波次构成一致
+  ✓ 画质三档：手动锁档（cfg fx=1→L0 / fx=2→L2）+ NV_CHEAT 治理器降档/回升
+  ✓ R18 特效开关：星野漂移/网格深呼吸 L0 开 → L2 冻结（低档仅静态）+ 扫描线转场 0.3s
+  ✓ R18 toast 避让落点（844×390）：levelup 落副标题带且不被状态遮罩压暗（绘制层级后移）
+  ✓ R18 BOSS 分帧爆散：队列逐波引信（峰值 ≤ 粒子预算）+ 残影死亡数据流字符流
+  ✓ 种子对决全链路：构建→码→开局→成绩码→对决史→判胜负
+  ✓ 昨日之影：昨日采样注入 → 开局召唤回放 → 本机采样落盘 → 结算对比
+  ✓ ghost 胜局实机：hp1 辅助 → 真实受击死亡 → winGame → 残影讨伐结算
+  ✓ brb 胜局实机：hp1 辅助 → 通关自定义连战 → 全灭达成结算
+  ✓ [R17-PHANTOM] brb 连胜 2 场实机：连杀两场 BOSS → 结算场次=2 · 无第 3 场幻影
+  ✓ [R17-IBUF] 演出窗技能缓冲：升级三选一/波次闸窗内按技能键 → 窗末首帧原序释放（riftCd 落表即释放证据；[R19-MEMLOOP] 恢复）
+  ✓ 色盲模式：默认关 + 默认弹幕/拾取物像素原生色 · 开启后杂兵弹橙/BOSS 弹蓝菱/拾取物换板 + 设置页记忆
+  ✓ 触屏 44px：全阶段按钮 touch rect ≥44 实测（NV_BTN）+ chips/模式/结算/重抽钮外扩点按行为验证
+  ✓ 触屏完整一局（844×390 仿真）：鼠标 hover 白圈→触屏清除（像素实测）· 摇杆/技能/升级选卡/波次闸/结算重启全触屏路径 · 零 pageerror
+  ✓ monkey：5 分钟随机点击/按键/摇杆注入 + 间歇 resize/visibility 切换 — 零 pageerror · 进程存活 · 可退回标题
+  ✓ [R20-CFG] 设置页实机：11 行（双滑条/三档/开关）· 震动三档往返 + 高亮像素落在「强」· 滑条点轨即设 + 末行不压返回钮
+  ✓ [R20-WONHD] 胜局结算头延迟入场：横幅存活期大标题/★新纪录让位（boss 单场 + brb 连胜两路径），横幅自灭后淡入补位
+  ✓ [R20-KC] 结算击杀镜头开关：默认开（KILLCAM 回放层在场）→ 设置关（直接进结算，回放层消失）
+  ✓ [R20-JOY] 摇杆死区/灵敏度实机（844×390 触屏）：大死区 15px 不起手 · 小死区起手 · 低灵敏半程减速 / 高灵敏全速
+  ✓ 对决构建页实机：档位按钮带 →「波次上限」标签 → 初始构筑标题，亮像素剖面三段分离
+  ✓ 存档迁移实机：v1 悬赏码 + 旧 lb/dstat/duels/shadow 一包旧档 → 零异常加载 + 自愈就位 + 对局落盘迁移
+  ✓ 手感层回归：擦弹预警环带（默认/色盲金带）· 死亡演出窗（deadT + 窗内禁暂停）· BOSS 出场镜头与血条受击白影 · 连杀中断播报
+  ✓ [R17-GRAZEFX] 擦弹成功瞬间反馈闭环：gshotIn → grazes++ + 落点火花迸发像素（A/B 差分）· 预警环带仍在位
+  ✓ [R17-GLOW] 连杀里程碑边缘光晕：触发亮起+自然衰减 · 被压播报降级 toast（音画同步）· 色盲换板 · L1+ 跳过
+  ✓ [R17-MEM] 跨局记忆泄漏清零：经典局到过的连杀档不再让 BOSS 局里程碑哑火（G.ms 随局复位）
+  ✓ 色盲模式 × FPS 降级组合矩阵：cb=1 下 L0→L1→L2→回升全链路（治理器 + 弹幕上限 + 色盲橙弹像素逐档核验）
+  · boot classic  267ms(snap) / 358ms(ready)
+  · boot endless  281ms(snap) / 370ms(ready)
+  · boot boss     282ms(snap) / 396ms(ready)
+  · boot chaos    283ms(snap) / 378ms(ready)
+  · boot daily    287ms(snap) / 384ms(ready)
+  · boot versus   272ms(snap) / 363ms(ready)
+  · boot graze    274ms(snap) / 369ms(ready)
+  · boot ghost    239ms(snap) / 243ms(ready)
+  · boot brb      276ms(snap) / 321ms(ready)
+  · boot duel     281ms(snap) / 367ms(ready)
+  · boot duelres  253ms(snap) / 255ms(ready)
+  ✓ 性能基线：10 形态逐一 boot ≤2s（导航起 → 形态就绪，逐形态采样）
+  · heap 30s：2.91MB → 3.92MB（GC 后），增长 1.01MB
+  ✓ 性能基线：对局 30s JS heap 增长 ≤5MB（classic 实机 + CDP 强制 GC 双端采样）
+  · SW 离线启动 26ms（state=title）
+  ✓ 性能基线：SW 离线启动 ≤3s（先在线装 SW → 断网重载 → NV_SNAP 就绪）
+  · 第 1/10 局 classic  score=    100  wave=1  kills=1 levels=0  4.3s
+  · 第 2/10 局 endless  score=    100  wave=1  kills=1 levels=0  4.5s
+  · 第 3/10 局 boss     score=      0  wave=1  kills=1 levels=0  4.2s
+  · 第 4/10 局 chaos    score=    200  wave=1  kills=1 levels=0  4.5s
+  · 第 5/10 局 graze    score=      0  wave=1  kills=1 levels=0  4.2s
+  · 第 6/10 局 versus   score=     15  wave=0  kills=1 levels=0  4.2s
+  · 第 7/10 局 daily    score=    400  wave=1  kills=1 levels=0  4.2s
+  · 第 8/10 局 duel     score=    200  wave=1  kills=1 levels=0  3.9s
+  · 第 9/10 局 ghost    score=      0  wave=4  kills=1 levels=0  3.9s
+  · 第 10/10 局 brb      score=      0  wave=1  kills=1 levels=0  3.9s
+  · heap：2.74MB → 3.66MB（GC 后），10 局增长 0.91MB
+  · 压测后 SW 离线启动 50ms（基线套件 26ms，state=title）
+  ✓ 连局压测：同一页面连续 10 局（10 形态抽 6 + 每日 + 种子对决 + 补抽 2 形态）— 零 pageerror · heap ≤8MB · SW 离线 ≤3s 不劣化
+  · SW 升级接管 2748ms（旧缓存已清；缓存/网络/导航三路资源=新版）
+  ✓ SW 升级路径：旧版缓存接管 → 发布新版 → skipWaiting 接管后缓存/网络/导航三路资源全部为新版
+  ✓ [R18b-QT5] BOSS 血条在场 toast 让位 ⏱@48：⏱@37 字身像素 A/B 不被胶囊切（844×390）
+  ✓ [R18b-ACH2] 升级屏成就弹窗整窗暂隐 → 选卡续播 + [R18b-XPB] 844×320 经验条避让卡排（844×390 对照保留）
+
+[e2e] 48 passed, 0 failed, 48 total (695866ms)
+
+性能基线 → nv-r20-final-e2e-shots\perf-baseline.json
+截图/工件目录: ./nv-r20-final-e2e-shots
+
+========== SUMMARY ==========
+unit: PASS (exit 0)
+e2e: PASS (exit 0)
+
+RESULT: ALL GREEN

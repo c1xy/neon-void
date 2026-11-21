@@ -463,44 +463,68 @@ s.test('overTitle 六形态逐一核对', () => {
   assert.deep(a.overTitle(), expect.classic, '未知形态回落 default（虚空肃清）');
 });
 
-/* ================= [FIX-CFG2] 设置页开关语义（真实源码提取 CFGS/CFG/CFG_RNG） ================= */
-s.test('CFGS 开关语义：二值行 o[1] 必须=「开」；shake/scan=[关,开]，mute 反相 [开,关] 恰好正确', () => {
+/* ================= [FIX-CFG2]+[R20-CFG] 设置页开关语义（真实源码提取 CFGS/CFG/CFG_RNG） ================= */
+s.test('CFGS 开关语义（[R20-CFG] 改版）：二值行 o[1]=「开」· shake 三档回填=强 · bgm/se 滑条无 o · mute 行收编', () => {
   const src = getSource();
   const CFGS = new Function(extractDecl(src, 'CFGS') + '; return CFGS;')();
   const CFG_RNG = new Function(extractDecl(src, 'CFG_RNG') + '; return CFG_RNG;')();
   const row = k => { const r = CFGS.find(x => x.k === k); assert.ok(r, 'CFGS 行存在: ' + k); return r; };
-  // 逐行不变式：CFG_RNG 上限=1 的二值行（mute 除外——其键语义反相，0=不静音）序号 1 必须=「开」：
-  // 缺键回填 1（布尔真值闸门=开）时渲染高亮必须落在「开」上
-  // （[FIX-CFG1] wgate/shadow 同款陷阱，[FIX-CFG2] shake/scan 一并修正）
+  // 逐行不变式：CFG_RNG 上限=1 的二值行序号 1 必须=「开」：缺键回填 1（布尔真值闸门=开）时
+  // 渲染高亮必须落在「开」上（[FIX-CFG1] wgate/shadow 同款陷阱、[FIX-CFG2] scan 修正，
+  // [R20-CFG] 新增 killcam 行同律——[R20-CFG] 行改造不得破坏既有行序语义）
   for (const r of CFGS) {
-    if (CFG_RNG[r.k] !== 1 || r.k === 'mute') continue;
+    if (CFG_RNG[r.k] !== 1) continue;
     assert.eq(r.o.length, 2, r.k + ' 二值行选项数=2');
     assert.eq(r.o[1], '开', r.k + ' o[1] 必须=「开」（回填值 1 的渲染标签）');
     assert.eq(r.o[0], '关', r.k + ' o[0]=「关」');
   }
-  // 点名修复的行 + 明确不动的 mute 行 + [A11Y-CB] 色盲行同律
-  assert.deep(row('shake').o, ['关', '开'], '屏幕震动行');
-  assert.deep(row('scan').o, ['关', '开'], 'CRT 扫描线行');
+  // 点名行：shake 三档化（[R20-CFG]）——缺键回填 2=「强」=旧布尔「开」的全额强度，老玩家不静默降档
+  assert.deep(row('shake').o, ['关', '弱', '强'], '屏幕震动行三档（关/弱/强）');
+  assert.eq(CFG_RNG.shake, 2, 'shake 缺键回填=2（强，[FIX-CFG2] 序语义延续）');
+  assert.deep(row('scan').o, ['关', '开'], 'CRT 扫描线行不动（[FIX-CFG2]）');
   assert.deep(row('shadow').o, ['关', '开'], '昨日之影行（[FIX-CFG1] 回归）');
   assert.deep(row('wgate').o, ['关', '开'], '波间暂停行（[FIX-CFG1] 回归）');
   assert.deep(row('cb').o, ['关', '开'], '色盲模式行（[A11Y-CB] 默认关）');
-  assert.deep(row('mute').o, ['开', '关'], '声音总开关行键语义反相（0=不静音）恰好正确——不许动');
-  // 布尔真值闸门消费点仍在位：scan → 扫描线显隐；shake → 震幅乘数
+  assert.deep(row('killcam').o, ['关', '开'], '结算击杀镜头行（[R20-KC]）');
+  assert.eq(CFG_RNG.killcam, 1, 'killcam 缺键回填=开（旧行为）');
+  // 双滑条行（[R20-SLIDER]）：无 o 数组（不走 cfg: 点击换档），CFG_RNG=10 即 0-10 档
+  for (const k of ['bgm', 'se']) {
+    const r = row(k);
+    assert.ok(r.sl, k + ' 是滑条行（sl 标记）');
+    assert.ok(!r.o, k + ' 无选项数组（滑条点击轨道换档）');
+    assert.eq(CFG_RNG[k], 10, k + ' 0-10 档上限（缺键回填 10=旧「正常」满档）');
+  }
+  // 摇杆三档行（[R20-JOY]）：CFG_RNG=合法上限；缺键默认走 const CFG 字面量=旧版行为
+  //（jdz 标准 12px=JOY_DZ[1] / jsens 高=过死区即全速）——多档行上限≠默认值，默认值断言钉字面量
+  assert.deep(row('jdz').o, ['小', '标准', '大'], '摇杆死区行三档');
+  assert.eq(CFG_RNG.jdz, 2, 'jdz 合法上限=2（大）');
+  assert.ok(src.indexOf('killcam: 1, jdz: 1, jsens: 2 }') >= 0, 'const CFG 默认：killcam 开 / jdz 标准 / jsens 高（旧行为等价）');
+  assert.deep(row('jsens').o, ['低', '标准', '高'], '摇杆灵敏度行三档');
+  assert.eq(CFG_RNG.jsens, 2, 'jsens 合法上限=2（高）');
+  // mute/sfx/mus 三行收编为 bgm/se 双滑条；M 键主静音消费点保留
+  assert.ok(!CFGS.some(r => r.k === 'mute' || r.k === 'sfx' || r.k === 'mus'), 'mute/sfx/mus 三行已收编为 bgm/se 双滑条');
+  // 消费点在位：scan → 扫描线显隐；shake → SHAKE_K 乘数；音量 → 双滑条线性增益；killcam → drawKillcam 门；摇杆 → JOY_DZ/jsens
   assert.ok(src.indexOf("sc.style.display = CFG.scan ? '' : 'none'") >= 0, 'applyCfg 的 CFG.scan 真值闸门在位');
-  assert.ok(src.indexOf('CFG.shake') >= 0, 'CFG.shake 真值乘数消费点在位');
+  assert.ok(src.indexOf('SHAKE_K[CFG.shake]') >= 0, 'CFG.shake 三档乘数消费点在位');
+  assert.ok(src.indexOf('0.09 * CFG.se') >= 0 && src.indexOf('0.05 * CFG.bgm') >= 0, '双滑条线性增益消费点在位');
+  assert.ok(src.indexOf('!CFG.killcam || G.state') >= 0, 'killcam 真值门在 drawKillcam 在位');
+  assert.ok(src.indexOf('JOY_DZ[CFG.jdz]') >= 0 && src.indexOf('CFG.jsens') >= 0, '摇杆死区/灵敏度消费点在位');
+  assert.ok(src.indexOf('CFG.mute') >= 0, 'M 键主静音 CFG.mute 消费点保留');
 });
 
-/* ================= [FIX-GEOM1]+[R13-GEOM1] setGeom 全视口扫描（真实源码提取，SAFE 归零） =================
-   9 行设置项（含色盲模式）在 H=300..900 全程：行盒不交叠、不压副标题/返回按钮/榜块标题。
-   crowd 档（H<430）标题块上移 0.30H + 行盒收薄 14px（R12 遗留：844×390 末行压返回钮 7.8px、
-   844×320 末 3 行压钮 12~48px 且被屏幕下缘截断 10px —— 本扫描覆盖该回归带）。 */
-s.test('setGeom 全视口扫描 H=300..900：行盒不交叠、不压副标题/返回按钮/榜块标题', () => {
+/* ================= [FIX-GEOM1]+[R13-GEOM1]+[R20-CFG] setGeom 全视口扫描（真实源码提取，SAFE 归零） =================
+   11 行设置项（[R20-CFG] 行改造后含色盲/击杀镜头/摇杆两行）在 H=300..900 全程：行盒不交叠、
+   不压副标题/返回按钮/榜块标题。crowd 档（H<430）标题块上移 0.30H + 行盒收薄 14px（R12 遗留：
+   844×390 末行压返回钮 7.8px、844×320 末 3 行压钮 12~48px 且被屏幕下缘截断 10px —— 本扫描覆盖该
+   回归带）；[R20-CFG] 9→11 行后 compact/桌面行盒收薄（16/22），H=300 极端档物理放不下 11 行但
+   断言带从 H≥370 起（真实设备最低横屏档 844×320=H320 全程受检）。 */
+s.test('setGeom 全视口扫描 H=300..900（11 行）：行盒不交叠、不压副标题/返回按钮/榜块标题', () => {
   const src = getSource();
   const CL = new Function(extractDecl(src, 'CL') + '; return CL;')();
   const CFGS = new Function(extractDecl(src, 'CFGS') + '; return CFGS;')();
   const SAFE0 = { l: 0, r: 0, t: 0, b: 0 };
   const n = CFGS.length;
-  assert.eq(n, 9, 'CFGS 9 行（含色盲模式）——几何扫描前提');
+  assert.eq(n, 11, 'CFGS 11 行（[R20-CFG] 双滑条+击杀镜头+摇杆两行）——几何扫描前提');
   for (let H = 300; H <= 900; H++) {
     const setGeom = new Function('H', 'CFGS', 'SAFE', 'CL', extractFn(src, 'setGeom') + '; return setGeom;')(H, CFGS, SAFE0, CL);
     const sg = setGeom();
@@ -664,6 +688,51 @@ s.test('存档迁移矩阵 ⑧ duels 旧行缺字段：me/opp/res/deck/t 补全 
   assert.deep(a.sanitizeDuels('garbage'), [], '非 JSON → 空史');
 });
 
+/* ================= [R20-CFG] 存档迁移矩阵 ⑨：旧档仅含 mute/shake 布尔字段（v1.5.8- 音量滑条前一代）
+   → mute 布尔映射 BGM/SE 双滑条、shake 布尔映射三档（「开」=全额强度→「强」，绝不静默降档） ================= */
+s.test('存档迁移矩阵 ⑨ 旧档仅含 mute/shake 布尔字段：migrateCfg → 双滑条映射 + 新代档原样信任', () => {
+  const src = getSource();
+  const CL = new Function(extractDecl(src, 'CL') + '; return CL;')();
+  const migrateCfg = new Function('CL', extractFn(src, 'migrateCfg') + '; return migrateCfg;')(CL);
+  // 旧档只有 mute 布尔：1 → 双滑条落 0（静音意图整体吸收）；0 → 满档默认（旧「正常」）
+  let m = migrateCfg({ mute: 1 });
+  assert.eq(m.bgm, 0, '旧档 {mute:1} → BGM 0');
+  assert.eq(m.se, 0, '旧档 {mute:1} → SE 0');
+  assert.eq(m.mute, 0, '旧静音布尔吸收为滑条后 mute 归 0（不双重静音，M 键可再开）');
+  m = migrateCfg({ mute: 0 });
+  assert.eq(m.bgm, 10, '旧档 {mute:0} → BGM 满档 10');
+  assert.eq(m.se, 10, '旧档 {mute:0} → SE 满档 10');
+  // 旧档 sfx/mus 三档与 mute 并存：mute=1 优先吸收（用户明确静音过）；否则线性映射 低≈4 / 正常=10 / 关=0
+  m = migrateCfg({ mute: 1, sfx: 1, mus: 1 });
+  assert.eq(m.bgm, 0, '{mute:1,sfx:1,mus:1} → BGM 0（mute 优先）');
+  assert.eq(m.se, 0, '{mute:1,sfx:1,mus:1} → SE 0（mute 优先）');
+  m = migrateCfg({ mute: 0, sfx: 1, mus: 2 });
+  assert.eq(m.se, 4, '旧 sfx「低」(1) → SE 4');
+  assert.eq(m.bgm, 10, '旧 mus「正常」(2) → BGM 10');
+  m = migrateCfg({ sfx: 0, mus: 0 });
+  assert.eq(m.se, 0, '旧 sfx「关」(0) → SE 0');
+  assert.eq(m.bgm, 0, '旧 mus「关」(0) → BGM 0');
+  // shake 旧布尔：1（开=全额强度）→ 强(2) 行为不变；0 → 关(0) 原样
+  m = migrateCfg({ shake: 1 });
+  assert.eq(m.shake, 2, '旧档 {shake:1}（开）→ 强 2（不静默降档为「弱」）');
+  m = migrateCfg({ shake: 0 });
+  assert.eq(m.shake, 0, '旧档 {shake:0}（关）→ 关 0');
+  // 旧代 sfx/mus 死键迁移后清除
+  m = migrateCfg({ sfx: 2, mus: 2, shake: 0 });
+  assert.ok(!('sfx' in m) && !('mus' in m), '旧代音量键 sfx/mus 迁移后清除');
+  // 新代档（已有 bgm/se）原样信任：shake 1 =「弱」honest，不触发旧布尔映射
+  m = migrateCfg({ bgm: 3, se: 7, shake: 1, jsens: 1, jdz: 2, killcam: 0 });
+  assert.eq(m.bgm, 3, '新代档 bgm 原样');
+  assert.eq(m.se, 7, '新代档 se 原样');
+  assert.eq(m.shake, 1, '新代档 shake 1=「弱」原样（不触发旧布尔映射）');
+  assert.eq(m.killcam, 0, '新代档 killcam 原样');
+  // 空档/坏档 → 不炸；缺省键不动（下游 const CFG 字面量默认 + CFG_RNG 校验兜底，shake 默认=2 强已由字面量断言钉住）
+  m = migrateCfg(null);
+  assert.eq(m.bgm, 10, '空档 → BGM 默认 10');
+  assert.eq(m.se, 10, '空档 → SE 默认 10');
+  assert.ok(!('shake' in m), '空档不虚构 shake 键（默认由 const CFG 提供）');
+});
+
 (async () => {
   const r = await s.run();
   // 源码自检：确认宣传语补全与提示行让位已在 index.html 中（本轮清账项的静态断言）
@@ -708,10 +777,10 @@ s.test('存档迁移矩阵 ⑧ duels 旧行缺字段：me/opp/res/deck/t 补全 
     assert.ok(src.indexOf('inv ? 86 : 150') < 0, '旧版网格顶 150 已移除');
     assert.ok(src.indexOf('const dnFit = Math.max(0, Math.floor((Math.min(H - 56 - SAFE.b, H * 0.80) - 8 - (hy + 15)) / 13) + 1);') >= 0, '对决史条数按动作按钮带钳制在位');
   });
-  suite2.test('[FIX-GEOM1]+[R13-GEOM1] setGeom compact 行高 18 / crowd 档 14 与行距下限持平 + 榜块让位判定提前 8px', () => {
-    assert.ok(src.indexOf('const h = crowd ? 14 : compact ? 18 : 26, n = CFGS.length;') >= 0, 'compact 18（旧版 20 > pfloor 18 → 行盒交叠）/ crowd 14（极矮横屏 9 行压返回钮修复）');
+  suite2.test('[FIX-GEOM1]+[R13-GEOM1]+[R20-CFG] setGeom compact 行高 16 / 桌面 22 / crowd 档 14 与行距下限持平 + 榜块让位判定提前 8px', () => {
+    assert.ok(src.indexOf('const h = crowd ? 14 : compact ? 16 : 22, n = CFGS.length;') >= 0, 'compact 16 / 桌面 22（[R20-CFG] 9→11 行收薄，行距下限与行高持平）/ crowd 14（极矮横屏压返回钮修复）');
     assert.ok(src.indexOf('if (H > 430 && bottom0 > honTop - 8) {') >= 0, '榜块标题字身（honTop-7）让位判定提前 8px 触发');
-    assert.ok(src.indexOf('const pfloor = crowd ? 14 : compact ? 18 : 28;') >= 0, '行距下限与行高持平（行盒相接不交叠）');
+    assert.ok(src.indexOf('const pfloor = crowd ? 14 : compact ? 16 : 22;') >= 0, '行距下限与行高持平（行盒相接不交叠）');
     assert.ok(src.indexOf('const crowd = compact && H < 430;') >= 0, 'crowd 极矮横屏档（844×390 / 844×320）在位');
     assert.ok(src.indexOf('const hdrY = crowd ? Math.max(56, H * 0.30) : H * 0.425;') >= 0, 'crowd 标题块上移 0.30H 在位');
     assert.ok(src.indexOf("txt('—— 系统设置 · SETTINGS ——', cx, sg.hdrY,") >= 0, '设置页标题跟随 hdrY（渲染/几何同源）');
@@ -723,8 +792,8 @@ s.test('存档迁移矩阵 ⑧ duels 旧行缺字段：me/opp/res/deck/t 补全 
     const idx = getSource();
     const vs = idx.match(/NEON VOID v(\d+\.\d+\.\d+)/);
     assert.ok(vs, 'index.html 页脚版本串在位');
-    assert.eq(vs[1], '1.5.8', 'index.html 版本 = 1.5.8（本轮发版）');
-    assert.eq(+m[1], 18, 'sw.js CACHE = v18（上一版 v17 + 1）');
+    assert.eq(vs[1], '1.5.9', 'index.html 版本 = 1.5.9（本轮发版）');
+    assert.eq(+m[1], 19, 'sw.js CACHE = v19（上一版 v18 + 1）');
   });
   suite2.test('[R14-HOV] hover 白圈判定带 mouse.inside 门 + 触屏事件同步清 hover 态', () => {
     // 四处 hov 判定（title 按钮/升级卡/波次闸/结算钮）全部带 inside 门——stuck hover 清零

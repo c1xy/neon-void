@@ -10,7 +10,10 @@
    [R15-CB×FPS] 色盲×画质降档组合矩阵、[R13-MIGRATE] 存档迁移实机（旧档一包 + v1 悬赏码）、性能基线（boot/heap/SW 离线）、
    [R16-MARATHON] 连局压测（同一页面连续 10 局完整对局：零 pageerror · heap ≤8MB · SW 离线 ≤3s 不劣化）、
    [R16-SWUPG] SW 升级路径（旧缓存版本→发布新版→接管后缓存/网络/导航三路资源全为新版）、
-   [R13-MONKEY] 5 分钟随机输入 + 间歇 resize/visibility 切换（零 pageerror）。
+   [R13-MONKEY] 5 分钟随机输入 + 间歇 resize/visibility 切换（零 pageerror）、
+   [R20] 记忆科学二期（设置页 11 行：BGM/SE 双滑条点轨即设/震动三档/击杀镜头开关/摇杆死区灵敏度 ·
+   [R20-WONHD] 胜局结算头延迟入场（boss 单场+brb 连胜两路径像素 A/B）· [R20-KC] 击杀镜头开关 A/B ·
+   [R20-JOY] 摇杆三档触屏实机 · [R20-CFG] 迁移实机补 mute/shake 旧布尔档映射）。
    截图输出：环境变量 NV_E2E_SHOTS 指定的目录（缺省 = 系统临时目录下的 neon-void-e2e-shots）。
    运行：node tests/e2e.test.js */
 'use strict';
@@ -508,7 +511,8 @@ async function backToTitle(b, ms) {
     const g0 = await b0.snap();
     await b0.page.waitForTimeout(600);
     const g1 = await b0.snap();
-    assert.ok(g1.st0[1] > g0.st0[1], 'L0 星野漂移：首星 y ' + g0.st0[1] + '→' + g1.st0[1]);
+    assert.ok(g1.st0[1] > g0.st0[1] || (g0.st0[1] > 0.99 && g1.st0[1] < 0.01),
+      'L0 星野漂移：首星 y ' + g0.st0[1] + '→' + g1.st0[1] + '（下漂到 1.0 越界回绕视为继续漂移）');
     assert.ok(g1.gridWaveT !== g0.gridWaveT, 'L0 网格深呼吸引信走动：' + g0.gridWaveT + '→' + g1.gridWaveT);
     await b0.page.evaluate('window.NV_CHEAT.wave()');
     const sc = await b0.snap();
@@ -1263,7 +1267,7 @@ async function backToTitle(b, ms) {
   });
 
   /* ================= [FIX-CFG2]/[FIX-GEOM1]+[R13-GEOM1] 设置页实机（渲染标签 = 实际行为） ================= */
-  s.test('设置页实机：scan/shake 开关语义往返 + 高亮像素落在「开」+ 行盒不交叠 + 9 行不压返回钮', async () => {
+  s.test('[R20-CFG] 设置页实机：11 行（双滑条/三档/开关）· 震动三档往返 + 高亮像素落在「强」· 滑条点轨即设 + 末行不压返回钮', async () => {
     const b = await boot(browser, base);
     await b.page.mouse.click(773, 89); // ⚙ 设置 chip（W-130..W-12, y 76..102）
     await b.waitStage('set');
@@ -1271,15 +1275,27 @@ async function backToTitle(b, ms) {
     await b.page.waitForTimeout(250);
     const sg = (await b.snap()).sgeom;
     assert.ok(sg && sg.compact, '844×390 命中 compact 几何');
-    assert.ok(sg.pitch >= sg.h, '行盒不交叠（pitch ' + sg.pitch + ' ≥ 行高 ' + sg.h + '，[FIX-GEOM1] 旧版 18<20）');
-    // [R13-GEOM1] 回归线：末行（色盲模式）行盒底边必须让出「ESC · 返回」按钮上沿
-    const cfgAll = (await b.page.evaluate('window.NV_BTN()')).btns.filter(x => x.act && x.act.indexOf('cfg:') === 0);
+    assert.ok(sg.pitch >= sg.h, '行盒不交叠（pitch ' + sg.pitch.toFixed(2) + ' ≥ 行高 ' + sg.h + '，[R20-CFG] 11 行收薄后仍成立）');
+    const cfgAll = (await b.page.evaluate('window.NV_BTN()')).btns.filter(x => x.act && x.act.indexOf('cfg') === 0);
     const esc = (await b.page.evaluate('window.NV_BTN()')).btns.find(x => x.act === 'back');
-    const cbRow = cfgAll.filter(x => x.act.indexOf('cfg:cb:') === 0);
-    assert.ok(cbRow.length === 2 && esc, '色盲模式行与返回按钮都在');
-    const cbBottom = Math.max(...cbRow.map(x => x.y + x.h));
-    assert.ok(cbBottom <= esc.y, '末行（色盲模式）底边 ' + cbBottom.toFixed(1) + ' ≤ 返回钮上沿 ' + esc.y + '（R12 遗留：844×390 叠印 7.8px 已清零）');
-    // CFGS 行序（unit 侧已钉住数组本体）：0 mute / 5 shake / 6 scan；选项按钮 x 固定 W/2+10+oi*68, w62
+    assert.ok(esc, '「ESC · 返回」按钮在位');
+    // [R20-SLIDER] 双滑条行：整轨一个按钮（cfgs:bgm / cfgs:se），轨道宽 230（844×390 半屏档）
+    const slBg = cfgAll.find(x => x.act === 'cfgs:bgm');
+    const slSe = cfgAll.find(x => x.act === 'cfgs:se');
+    assert.ok(slBg && slSe, 'BGM/SE 双滑条行在位（整轨按钮）');
+    assert.ok(Math.abs(slBg.w - 230) < 1 && Math.abs(slSe.w - 230) < 1, '滑条轨道宽 230（sliderW 同源）');
+    assert.ok(Math.abs(slBg.y - sg.y0) < 2 && Math.abs(slSe.y - (sg.y0 + sg.pitch)) < 2, '滑条行 0/1 与 setGeom 行几何同源对齐');
+    // [R20-CFG] 11 行结构：bgm/sl · se/sl · wgate · fx · shake(3) · scan · killcam · shadow · cb · jdz(3) · jsens(3)
+    assert.eq(cfgAll.filter(x => x.act.indexOf('cfg:shake:') === 0).length, 3, '屏幕震动 3 选项（关/弱/强）');
+    assert.eq(cfgAll.filter(x => x.act.indexOf('cfg:jdz:') === 0).length, 3, '摇杆死区 3 选项（小/标准/大）');
+    assert.eq(cfgAll.filter(x => x.act.indexOf('cfg:jsens:') === 0).length, 3, '摇杆灵敏度 3 选项（低/标准/高）');
+    assert.eq(cfgAll.filter(x => x.act.indexOf('cfg:killcam:') === 0).length, 2, '结算击杀镜头 2 选项（关/开）');
+    assert.eq(cfgAll.filter(x => x.act.indexOf('cfg:cb:') === 0).length, 2, '色盲模式 2 选项（既有行不动）');
+    // [R13-GEOM1] 回归线延续：末行（摇杆灵敏度）行盒底边必须让出「ESC · 返回」按钮上沿
+    const jsensRow = cfgAll.filter(x => x.act.indexOf('cfg:jsens:') === 0);
+    const lastBottom = Math.max(...jsensRow.map(x => x.y + x.h));
+    assert.ok(lastBottom <= esc.y, '末行（摇杆灵敏度）底边 ' + lastBottom.toFixed(1) + ' ≤ 返回钮上沿 ' + esc.y + '（11 行几何回归）');
+    // CFGS 行序（unit 侧钉住数组本体）：4 shake / 5 scan；选项按钮 x 固定 W/2+10+oi*68, w62
     const btnStat = (x0, x1, yT, h) => b.page.evaluate(([a, c, d, w]) => {
       const img = document.getElementById('nv-canvas').getContext('2d').getImageData(a, c, w, d).data;
       let maxRB = -999;
@@ -1287,40 +1303,270 @@ async function backToTitle(b, ms) {
       return maxRB; // 高亮 #ffc233 → R-B=204；未选 #5a7090 → R-B≈-54
     }, [x0, yT, h, x1 - x0]);
     const rowY = i => [Math.round(sg.y0 + i * sg.pitch), sg.h];
-    const oi0 = 432, oi1 = 500, w = 62;
-    const readRow = async i => {
+    const oi0 = 432, oi1 = 500, oi2 = 568, w = 62;
+    const readRow = async (i, third) => {
       const [yT, h] = rowY(i);
-      return { a: await btnStat(oi0, oi0 + w, yT, h), b: await btnStat(oi1, oi1 + w, yT, h) };
+      return { a: await btnStat(oi0, oi0 + w, yT, h), b: await btnStat(oi1, oi1 + w, yT, h), c: third ? await btnStat(oi2, oi2 + w, yT, h) : null };
     };
     const cls = rb => rb > 100 ? 'Y' : 'g';
-    // 缺键回填：shake/scan=1 → 高亮必须落在 oi1（「开」）；mute=0 → 高亮在 oi0（「开」=不静音，键语义反相恰好正确）
-    let st = await readRow(5);
-    assert.eq(cls(st.a) + cls(st.b), 'gY', 'shake 默认值 1 → 「开」高亮（渲染标签=布尔闸门）');
-    st = await readRow(6);
-    assert.eq(cls(st.a) + cls(st.b), 'gY', 'scan 默认值 1 → 「开」高亮');
-    st = await readRow(0);
-    assert.eq(cls(st.a) + cls(st.b), 'Yg', 'mute 默认值 0 → 「开」高亮（声音开，反相语义保持不动）');
-    // 点击往返：点「开」→ CFG 落 1 且扫描线 DOM 生效；点「关」→ 0 且隐藏
-    const scanY = rowY(6)[0] + Math.floor(sg.h / 2);
+    // 缺键默认：shake=2 → 高亮在 oi2（「强」=旧「开」全额强度）；scan=1 → oi1（「开」，[FIX-CFG2] 不动）
+    let st = await readRow(4, true);
+    assert.eq(cls(st.a) + cls(st.b) + cls(st.c), 'ggY', 'shake 默认值 2 → 「强」高亮（[R20-CFG] 回填=旧行为）');
+    st = await readRow(5);
+    assert.eq(cls(st.a) + cls(st.b), 'gY', 'scan 默认值 1 → 「开」高亮（既有语义不动）');
+    // 点击往返：shake 关→0 / 弱→1 / 强→2
     const cfgRead = () => b.page.evaluate('JSON.parse(localStorage.getItem("neonvoid_cfg")||"{}")');
-    const scanDisp = () => b.page.evaluate('getComputedStyle(document.querySelector(".nv-scan")).display');
-    await b.page.mouse.click(oi1 + w / 2, scanY); await b.page.mouse.move(10, 10); await b.page.waitForTimeout(150);
-    assert.eq((await cfgRead()).scan, 1, '点「开」→ CFG.scan=1');
-    assert.ok(await scanDisp() !== 'none', 'CFG.scan=1 → 扫描线显示（真值闸门生效）');
-    st = await readRow(6);
-    assert.eq(cls(st.a) + cls(st.b), 'gY', 'scan=1 渲染高亮在「开」');
-    await b.page.mouse.click(oi0 + w / 2, scanY); await b.page.mouse.move(10, 10); await b.page.waitForTimeout(150);
-    assert.eq((await cfgRead()).scan, 0, '点「关」→ CFG.scan=0');
-    assert.eq(await scanDisp(), 'none', 'CFG.scan=0 → 扫描线隐藏');
-    // shake 行同样往返（值落盘即契约；渲染侧乘数消费点由 unit 静态断言钉住）
-    const shakeY = rowY(5)[0] + Math.floor(sg.h / 2);
+    const shakeY = rowY(4)[0] + Math.floor(sg.h / 2);
     await b.page.mouse.click(oi0 + w / 2, shakeY); await b.page.mouse.move(10, 10); await b.page.waitForTimeout(150);
     assert.eq((await cfgRead()).shake, 0, 'shake 点「关」→ 0');
     await b.page.mouse.click(oi1 + w / 2, shakeY); await b.page.mouse.move(10, 10); await b.page.waitForTimeout(150);
-    assert.eq((await cfgRead()).shake, 1, 'shake 点「开」→ 1');
+    assert.eq((await cfgRead()).shake, 1, 'shake 点「弱」→ 1');
+    await b.page.mouse.click(oi2 + w / 2, shakeY); await b.page.mouse.move(10, 10); await b.page.waitForTimeout(150);
+    assert.eq((await cfgRead()).shake, 2, 'shake 点「强」→ 2');
+    st = await readRow(4, true);
+    assert.eq(cls(st.a) + cls(st.b) + cls(st.c), 'ggY', 'shake=2 渲染高亮在「强」');
+    // scan 语义往返（[FIX-CFG2] 契约：真值闸门 DOM 生效）
+    const scanDisp = () => b.page.evaluate('getComputedStyle(document.querySelector(".nv-scan")).display');
+    const scanY = rowY(5)[0] + Math.floor(sg.h / 2);
+    await b.page.mouse.click(oi1 + w / 2, scanY); await b.page.mouse.move(10, 10); await b.page.waitForTimeout(150);
+    assert.eq((await cfgRead()).scan, 1, '点「开」→ CFG.scan=1');
+    assert.ok(await scanDisp() !== 'none', 'CFG.scan=1 → 扫描线显示（真值闸门生效）');
+    await b.page.mouse.click(oi0 + w / 2, scanY); await b.page.mouse.move(10, 10); await b.page.waitForTimeout(150);
+    assert.eq((await cfgRead()).scan, 0, '点「关」→ CFG.scan=0');
+    assert.eq(await scanDisp(), 'none', 'CFG.scan=0 → 扫描线隐藏');
+    // killcam 行（[R20-KC]）：默认开 → 点「关」落 0 → 再点回开
+    const kcY = rowY(6)[0] + Math.floor(sg.h / 2);
+    await b.page.mouse.click(oi0 + w / 2, kcY); await b.page.mouse.move(10, 10); await b.page.waitForTimeout(150);
+    assert.eq((await cfgRead()).killcam, 0, 'killcam 点「关」→ 0');
+    await b.page.mouse.click(oi1 + w / 2, kcY); await b.page.mouse.move(10, 10); await b.page.waitForTimeout(150);
+    assert.eq((await cfgRead()).killcam, 1, 'killcam 点「开」→ 1');
+    // 摇杆行往返（[R20-JOY]）
+    const jdzY = rowY(9)[0] + Math.floor(sg.h / 2);
+    await b.page.mouse.click(oi2 + w / 2, jdzY); await b.page.mouse.move(10, 10); await b.page.waitForTimeout(150);
+    assert.eq((await cfgRead()).jdz, 2, 'jdz 点「大」→ 2');
+    await b.page.mouse.click(oi1 + w / 2, jdzY); await b.page.mouse.move(10, 10); await b.page.waitForTimeout(150);
+    assert.eq((await cfgRead()).jdz, 1, 'jdz 点「标准」→ 1（=旧硬编码 12px）');
+    // [R20-SLIDER] 滑条点轨即设：轨道 [432, 662]，0.3 位置 → 3；左缘 → 0；右缘 → 10；落盘即持久化
+    // 点击坐标走画布实际视口偏移换算（NV_BTN 是画布坐标，stage 有 1px 边框时不与视口重合）
+    const cvOff = await b.page.evaluate('(() => { const r = document.getElementById("nv-canvas").getBoundingClientRect(); return [r.left, r.top]; })()');
+    const slTap = async (frac, btn) => {
+      await b.page.mouse.click(Math.round(cvOff[0] + btn.x + btn.w * frac), Math.round(cvOff[1] + btn.y + btn.h / 2));
+      await b.page.mouse.move(10, 10); await b.page.waitForTimeout(150);
+    };
+    await slTap(0.3, slBg);
+    assert.eq((await cfgRead()).bgm, 3, 'BGM 滑条点 30% 处 → 3（0-10 档线性换算）');
+    await slTap(0.55, slSe);
+    assert.eq((await cfgRead()).se, 6, 'SE 滑条点 55% 处 → 6');
+    await slTap(0, slBg);
+    assert.eq((await cfgRead()).bgm, 0, 'BGM 滑条点左缘 → 0（全静）');
+    await slTap(1, slBg);
+    assert.eq((await cfgRead()).bgm, 10, 'BGM 滑条点右缘 → 10（满档）');
+    const saved = await cfgRead();
+    assert.ok(saved.bgm === 10 && saved.se === 6 && saved.shake === 2 && saved.jdz === 1, '全部设置项已落盘 localStorage（自动保存契约）');
     assert.deep(b.errors, [], '无未捕获异常');
     await b.shot('set-rows-844x390');
     await b.ctx.close();
+  });
+
+  /* ================= [R20-WONHD] 胜局结算头延迟入场 / [R20-KC] 击杀镜头开关 / [R20-JOY] 摇杆三档 ================= */
+  s.test('[R20-WONHD] 胜局结算头延迟入场：横幅存活期大标题/★新纪录让位（boss 单场 + brb 连胜两路径），横幅自灭后淡入补位', async () => {
+    const band = (page, x0, y0, x1, y1) => page.evaluate(([a, c, d, e]) => {
+      const img = document.getElementById('nv-canvas').getContext('2d').getImageData(a, c, d - a, e - c).data;
+      let mx = 0;
+      for (let i = 0; i < img.length; i += 4) mx = Math.max(mx, (img[i] + img[i + 1] + img[i + 2]) / 3);
+      return mx;
+    }, [x0, y0, x1, y1]);
+    // 「未入场」断言的采样器：6 次取最小——爆散余烬粒子是瞬态过客，标题不入场则带内只剩
+    // 暗罩下的星点/网格基线（实测 ~84）；「已补位」断言取 6 次最大——★新纪录有 0.6..1.0 呼吸透明度
+    const bandMin = async (page, x0, y0, x1, y1) => {
+      let mn = 999;
+      for (let i = 0; i < 6; i++) {
+        mn = Math.min(mn, await band(page, x0, y0, x1, y1));
+        await page.waitForTimeout(100);
+      }
+      return mn;
+    };
+    const bandMax = async (page, x0, y0, x1, y1) => {
+      let mx = 0;
+      for (let i = 0; i < 6; i++) {
+        mx = Math.max(mx, await band(page, x0, y0, x1, y1));
+        await page.waitForTimeout(100);
+      }
+      return mx;
+    };
+    // ★新纪录行专用：金色像素计数（R-B ≥ 60 且 R ≥ 120）——亮度会被 0.6..1.0 呼吸透明度调制，
+    // 金色色 signature 不随呼吸消失（alpha 0.6 时 R≈156/B≈40 仍命中）；网格青/星点白 R-B<0 不计入
+    const goldCount = async (page, x0, y0, x1, y1) => page.evaluate(([a, c, d, e]) => {
+      const img = document.getElementById('nv-canvas').getContext('2d').getImageData(a, c, d - a, e - c).data;
+      let n = 0;
+      for (let i = 0; i < img.length; i += 4) if (img[i] - img[i + 2] >= 60 && img[i] >= 120) n++;
+      return n;
+    }, [x0, y0, x1, y1]);
+    const W = 844, H = 390;
+    const titleY = Math.round(H * 0.22);
+    const ny = Math.max(H * 0.325, H * 0.22 + 52); // ★新纪录行位（spY+18 链，与渲染同式）
+    // ---- 路径 1：残影讨伐单场胜（boss 连战单场不清 winGame——bn>=6 才翻胜局；ghost 单 BOSS 即胜，
+    //      且横幅副题窄「GHOST SLAIN · 击杀链 +1」±73，★带右段可与横幅字身隔离）----
+    const code20 = codec.bountyPack({ lv: [2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], wave: 7, score: 5000, grazes: 10, chain: 2 });
+    const b = await boot(browser, base, { hash: '#bounty=' + code20 });
+    await b.page.keyboard.press('Enter');
+    await b.waitState('playing');
+    assert.ok((await b.snap()).boss, '残影 BOSS 在场');
+    await b.page.evaluate('window.NV_CHEAT.hp1()');
+    await b.waitState('over', 30000);
+    let sn = await b.snap();
+    assert.ok(sn.won && sn.banner && sn.banner.prio === 2, '胜局横幅（prio2）在场 t=' + (sn.banner && sn.banner.t));
+    // 等 winGame 白闪（flash 0.85 全屏白）与 BOSS 爆散粒子衰减后再采样；横幅 t≈1s 仍在存活期。
+    // 「未入场」断言取 6 次采样的最小值——爆散余烬粒子是瞬态过客，标题不入场则带内长期纯暗。
+    await b.page.waitForTimeout(900);
+    sn = await b.snap();
+    assert.ok(sn.banner && sn.banner.t < 2.0, '采样仍在横幅存活期（t=' + sn.banner.t.toFixed(2) + ' < 2.0s）');
+    // 大标题上缘带（H*0.22-24..-6）：横幅带（H*0.3±20=97..137）之上，只有结算大标题会画在这里
+    let headMax = await bandMin(b.page, W / 2 - 90, titleY - 24, W / 2 + 90, titleY - 6);
+    assert.ok(headMax < 120, '横幅存活期结算大标题未入场（带上缘 6 采样 min ' + headMax.toFixed(1) +
+      ' < 120=星点/网格基线，修前此处与横幅同名叠印至 ~166+）');
+    // ★新纪录行带（x 320..524 = ★ 文本实测跨度 319..524，y 129..144 = 17px 字身）：金色像素计数。
+    // ghost 横幅为薄荷色（R-B<0 不计入）、主文字身 ≤137 与本带相接但色 signature 不同——双保险
+    let goldN = await goldCount(b.page, 320, Math.round(ny) - 9, 524, Math.round(ny) + 6);
+    assert.ok(goldN < 8, '横幅存活期 ★新纪录行未入场（金色像素 ' + goldN + ' < 8）');
+    // 横幅自灭（t≈2.3s）→ 头部 0.4s 淡入补位
+    await b.page.waitForFunction('window.NV_SNAP().banner === null', null, { timeout: 6000 });
+    await b.page.waitForTimeout(550);
+    assert.eq((await b.snap()).banner, null, '横幅已自灭');
+    headMax = await bandMax(b.page, W / 2 - 90, titleY - 24, W / 2 + 90, titleY - 6);
+    assert.ok(headMax >= 150, '横幅自灭后结算大标题已补位（gold 字身 avg ~167 / mint ~201，6 采样 max ' + headMax.toFixed(1) + ' ≥ 150）');
+    goldN = await goldCount(b.page, 320, Math.round(ny) - 9, 524, Math.round(ny) + 6);
+    assert.ok(goldN >= 40, '★新纪录行已补位入场（金色像素 ' + goldN + ' ≥ 40，呼吸谷 alpha0.6 仍命中 signature）');
+    await b.shot('r20-won-head-after-banner');
+    await b.ctx.close();
+    // ---- 路径 2：brb 连胜 2 场（连胜路径同一守卫；至横幅自灭标题带再亮）----
+    const b2 = await boot(browser, base, { ls: { neonvoid_rush: JSON.stringify({ order: [0, 1], tier: 0 }) } });
+    await b2.page.keyboard.press('b');
+    await b2.waitStage('brb');
+    await b2.page.keyboard.press('Enter');
+    await b2.waitState('playing');
+    const dismissLevelup = async () => {
+      const s = await b2.snap();
+      if (s.state === 'levelup') { await b2.page.keyboard.press('Digit1'); return true; }
+      return false;
+    };
+    await b2.page.evaluate('window.NV_CHEAT.hp1()');
+    for (let i = 0; i < 90; i++) {
+      if (await dismissLevelup()) { await b2.page.waitForTimeout(150); continue; }
+      const s = await b2.snap();
+      if (s.wave === 2 && s.boss) break;
+      if (s.state === 'over') throw new Error('第 1 场后误入结算（won=' + s.won + '）');
+      await b2.page.waitForTimeout(500);
+    }
+    await b2.page.evaluate('window.NV_CHEAT.hp1()');
+    for (let i = 0; i < 40; i++) {
+      if (await dismissLevelup()) { await b2.page.waitForTimeout(150); continue; }
+      if ((await b2.snap()).state === 'over') break;
+      await b2.page.waitForTimeout(500);
+    }
+    sn = await b2.snap();
+    assert.ok(sn.state === 'over' && sn.won, '连胜 2 场真实胜局路径');
+    await b2.page.waitForTimeout(900); // 同路径 1：等白闪/爆散衰减，横幅 t≈1s 仍在存活期
+    sn = await b2.snap();
+    assert.ok(sn.banner && sn.banner.t < 2.0, '连胜结算横幅存活期采样（t=' + sn.banner.t.toFixed(2) + '）');
+    await b2.shot('r20-won-head-streak2-banner-window'); // 目检：横幅存活期结算头让位现场
+    headMax = await bandMin(b2.page, W / 2 - 90, titleY - 24, W / 2 + 90, titleY - 6);
+    assert.ok(headMax < 120, '连胜路径横幅存活期大标题同样让位（6 采样 min ' + headMax.toFixed(1) + ' < 120）');
+    await b2.page.waitForFunction('window.NV_SNAP().banner === null', null, { timeout: 6000 });
+    await b2.page.waitForTimeout(550);
+    headMax = await bandMax(b2.page, W / 2 - 90, titleY - 24, W / 2 + 90, titleY - 6);
+    assert.ok(headMax >= 150, '连胜路径横幅自灭后大标题补位（6 采样 max ' + headMax.toFixed(1) + ' ≥ 150）');
+    await b2.shot('r20-won-head-streak2');
+    assert.deep(b2.errors, [], '连胜路径无未捕获异常');
+    await b2.ctx.close();
+  });
+  s.test('[R20-KC] 结算击杀镜头开关：默认开（KILLCAM 回放层在场）→ 设置关（直接进结算，回放层消失）', async () => {
+    // 回放层标记带：「⟲ 击杀回放 · KILLCAM」标签左段（x 65..225，ky=按钮带顶-13，[R15-FIX1] 让位公式）
+    const kcBand = async b => {
+      for (let i = 0; i < 12; i++) { // 结算按钮带 over>0.7 才出现 → 轮询到非空再取 y
+        const btns = (await b.page.evaluate('window.NV_BTN()')).btns;
+        if (btns.length && btns[0] && btns[0].y) {
+          return b.page.evaluate(([btnY]) => {
+            const ky = Math.min(390 - 44, btnY - 13); // 844×390 基准视口（触屏 canvas 铺满）
+            const img = document.getElementById('nv-canvas').getContext('2d').getImageData(65, Math.round(ky) - 8, 160, 16).data;
+            let mx = 0;
+            for (let j = 0; j < img.length; j += 4) mx = Math.max(mx, (img[j] + img[j + 1] + img[j + 2]) / 3);
+            return mx;
+          }, [btns[0].y]);
+        }
+        await b.page.waitForTimeout(250);
+      }
+      throw new Error('结算按钮带 3s 内未出现（over>0.7 门）');
+    };
+    // ① 默认开：真实死亡 → 结算屏 KILLCAM 回放层在场
+    const b = await boot(browser, base);
+    await startModeByKey(b.page, '1');
+    await b.waitState('playing');
+    await b.page.evaluate('window.NV_CHEAT.kill()');
+    await b.waitState('over', 20000);
+    assert.eq((await b.snap()).cfg.killcam, 1, 'killcam 缺省=开（旧行为）');
+    const onMax = await kcBand(b);
+    assert.ok(onMax > 200, '默认开：击杀回放标签白字在场（max ' + onMax.toFixed(1) + ' > 200）');
+    await b.shot('r20-killcam-on');
+    // ② 设置页关掉：直接进结算，回放层整层消失
+    await b.page.waitForTimeout(900);
+    await b.page.keyboard.press('KeyT');
+    await b.waitStage('mode');
+    await b.page.keyboard.press('KeyS');
+    await b.waitStage('set');
+    const kcOff = (await b.page.evaluate('window.NV_BTN()')).btns.find(x => x.act === 'cfg:killcam:0');
+    assert.ok(kcOff, '设置页「结算击杀镜头 · 关」在位');
+    await b.page.mouse.click(kcOff.x + kcOff.w / 2, kcOff.y + kcOff.h / 2);
+    await b.page.waitForTimeout(200);
+    assert.eq(JSON.parse(await b.page.evaluate('localStorage.getItem("neonvoid_cfg")')).killcam, 0, 'killcam=0 落盘');
+    await b.page.keyboard.press('Escape');
+    await b.waitStage('mode');
+    await startModeByKey(b.page, '1');
+    await b.waitState('playing');
+    await b.page.evaluate('window.NV_CHEAT.kill()');
+    await b.waitState('over', 20000);
+    assert.eq((await b.snap()).cfg.killcam, 0, 'killcam=0 生效');
+    const offMax = await kcBand(b);
+    // 关闭后带内只剩背景网格线（实测基线 ~152）与结算按钮上沿：无白字标签（开态实测 ~255）
+    assert.ok(offMax < 190, '关闭后直接进结算：回放标签消失（max ' + offMax.toFixed(1) + ' < 190，网格基线 ~152）');
+    await b.shot('r20-killcam-off');
+    assert.deep(b.errors, [], '无未捕获异常');
+    await b.ctx.close();
+  });
+  s.test('[R20-JOY] 摇杆死区/灵敏度实机（844×390 触屏）：大死区 15px 不起手 · 小死区起手 · 低灵敏半程减速 / 高灵敏全速', async () => {
+    // 单次注入采样：触屏 pointerdown 左半屏起手 + pointermove 按住 dx 位移 → 600ms 后采样船体位移。
+    // 途中若弹升级三选一（击杀涨 XP）update 冻结会污染位移 → 状态不符 playing 即整例重试（≤3 次）。
+    const drift = async (cfg, dx) => {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const b = await boot(browser, base, { ls: { neonvoid_cfg: JSON.stringify(cfg) } });
+        await startModeByKey(b.page, '1');
+        await b.waitState('playing');
+        const jx = 150, jy = 200;
+        const p0 = await b.page.evaluate('window.NV_SNAP().pp');
+        await b.page.dispatchEvent('#nv-canvas', 'pointerdown',
+          { pointerType: 'touch', pointerId: 9, isPrimary: true, clientX: jx, clientY: jy, bubbles: true });
+        await b.page.dispatchEvent('#nv-canvas', 'pointermove',
+          { pointerType: 'touch', pointerId: 9, isPrimary: true, clientX: jx + dx, clientY: jy, bubbles: true });
+        await b.page.waitForTimeout(600);
+        const st = (await b.snap()).state;
+        const p1 = await b.page.evaluate('window.NV_SNAP().pp');
+        await b.page.dispatchEvent('#nv-canvas', 'pointerup',
+          { pointerType: 'touch', pointerId: 9, isPrimary: true, clientX: jx + dx, clientY: jy, bubbles: true });
+        const d = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]);
+        await b.ctx.close();
+        if (st === 'playing') return d;
+      }
+      throw new Error('3 次注入均被升级/波次窗打断（位移采样失败）');
+    };
+    const dDzBig = await drift({ jdz: 2, jsens: 2 }, 15);   // 大死区 22px：15px 位移不起手
+    const dDzSmall = await drift({ jdz: 0, jsens: 2 }, 15); // 小死区 6px：15px 起手全速
+    const dSlow = await drift({ jdz: 1, jsens: 0 }, 30);    // 标准 12 + 低灵敏：30px → 0.375 系数
+    const dFast = await drift({ jdz: 1, jsens: 2 }, 30);    // 标准 12 + 高灵敏（旧默认）：30px 全速
+    assert.ok(dDzBig < 3, '大死区（jdz=大 22px）：15px 摇杆位移不起手（位移 ' + dDzBig.toFixed(1) + 'px < 3）');
+    assert.ok(dDzSmall > 40, '小死区（jdz=小 6px）：同 15px 起手全速（位移 ' + dDzSmall.toFixed(1) + 'px > 40）');
+    assert.ok(dFast > 100, '高灵敏（jsens=高）：30px 全速（位移 ' + dFast.toFixed(1) + 'px > 100）');
+    assert.ok(dSlow > 15 && dSlow < dFast * 0.75, '低灵敏（jsens=低）：30px 走 0.375 系数曲线（位移 ' +
+      dSlow.toFixed(1) + 'px ∈ (15, ' + (dFast * 0.75).toFixed(0) + ')，方向不变只缩速度）');
   });
 
   /* ================= [FIX-DUEL1] 对决构建页实机（波次上限标签呼吸间距 ≥10px） ================= */
@@ -1384,7 +1630,9 @@ async function backToTitle(b, ms) {
       // v1.5 早期对决史行（无 opp/res/deck/t）
       neonvoid_duels: JSON.stringify([{ seed: 99, cap: 5, me: { s: 100 } }]),
       // v1.5 早期影子档（缺 v 字段 / 条目缺 sc·w）
-      neonvoid_shadow: JSON.stringify({ days: { [yday]: { s: [100, 80, 0, 200, 120, 1] } } })
+      neonvoid_shadow: JSON.stringify({ days: { [yday]: { s: [100, 80, 0, 200, 120, 1] } } }),
+      // [R20-CFG] v1.5.8- 旧设置档：仅 mute/shake 布尔 + sfx/mus 三档（无 bgm/se 双滑条键）
+      neonvoid_cfg: JSON.stringify({ mute: 1, shake: 1, sfx: 1, mus: 1 })
     };
     const v1code = mkV1();
     const b = await boot(browser, base, { hash: '#bounty=' + v1code, ls: legacyLs });
@@ -1426,6 +1674,28 @@ async function backToTitle(b, ms) {
     // ⑤ lb 旧行迁移：新记录入榜后全行带 m/c
     const lbRaw = JSON.parse(await b.page.evaluate('localStorage.getItem("neonvoid_lb")'));
     assert.ok(lbRaw.length >= 2 && lbRaw.every(r => typeof r.m === 'string' && typeof r.c === 'number'), 'lb 旧行（缺 m/c）已迁移补全');
+    // ⑥ [R20-CFG] 旧设置档（仅 mute/shake 布尔 + sfx/mus 三档）→ 双滑条/三档映射：
+    //    mute:1 静音意图 → BGM/SE 落 0；shake:1（旧「开」=全额强度）→「强」2；sfx/mus 死键清除
+    const snCfg = await b.snap();
+    assert.eq(snCfg.cfg.bgm, 0, '旧档 mute:1 → BGM 双滑条 0（静音意图等价迁移）');
+    assert.eq(snCfg.cfg.se, 0, '旧档 mute:1 → SE 双滑条 0');
+    assert.eq(snCfg.cfg.shake, 2, '旧档 shake:1（开）→ 三档「强」2（不静默降档）');
+    assert.eq(snCfg.cfg.killcam, 1, '缺键 killcam 回填开（旧行为）');
+    assert.eq(snCfg.cfg.jdz, 1, '缺键 jdz 回填标准（旧硬编码 12px）');
+    assert.eq(snCfg.cfg.jsens, 2, '缺键 jsens 回填高（旧行为=过死区即全速）');
+    // 设置页落盘后迁移形态固化：旧 sfx/mus 键不再回写
+    await b.page.waitForTimeout(1000); // 结算入场动画走完（KeyT 需 over>0.7）
+    await b.page.keyboard.press('KeyT'); // 结算 → 主界面
+    await b.waitStage('mode');
+    await b.page.keyboard.press('KeyS');
+    await b.waitStage('set');
+    const wgBtn = (await b.page.evaluate('window.NV_BTN()')).btns.find(x => x.act === 'cfg:wgate:1');
+    assert.ok(wgBtn, '迁移后设置页正常渲染（波间暂停行在位）');
+    await b.page.mouse.click(wgBtn.x + wgBtn.w / 2, wgBtn.y + wgBtn.h / 2);
+    await b.page.waitForTimeout(200);
+    const cfgRaw = JSON.parse(await b.page.evaluate('localStorage.getItem("neonvoid_cfg")'));
+    assert.ok(cfgRaw.bgm === 0 && cfgRaw.se === 0 && cfgRaw.shake === 2, '设置落盘为迁移后形态（bgm 0 / se 0 / shake 2）');
+    assert.ok(!('sfx' in cfgRaw) && !('mus' in cfgRaw), '旧代 sfx/mus 死键不再回写');
     assert.deep(b.errors, [], '全程零异常');
     await b.ctx.close();
   });
@@ -2049,6 +2319,12 @@ async function backToTitle(b, ms) {
     //    844×390 横排对照：levelup 条带像素可见 + xpBarN=1
     const b2 = await boot(browser, base, { vp: { width: 844, height: 320 } });
     await startModeByKey(b2.page, '1');
+    // xpBarN 是每帧瞬态真绘旗（drawXPBar 每帧先置 false 再置 true；title 态 drawHUD 不跑 →
+    // 开局首个 playing 渲染帧之前 undefined→0）。waitState('playing') 的 rAF 轮询与首个 playing
+    // 帧的 drawHUD 存在竞态：快照若落在首帧前读到 0（2026-11-21 测试机实机复现一次）。
+    // 等旗置 1（下一帧即真；若回归使 playing 态持续暂隐则 5s 超时照红）——暂隐契约由下方
+    // levelup xpBarN=0 断言独立守护，此处等待不弱化判定。
+    await b2.page.waitForFunction('window.NV_SNAP().xpBarN === 1', null, { timeout: 5000 });
     assert.eq((await b2.snap()).xpBarN, 1, '320 对局态经验条真绘');
     await b2.page.evaluate('window.NV_CHEAT.xp()');
     await b2.waitState('levelup');
