@@ -338,29 +338,52 @@ function fmtTime(s) {
   const m = Math.floor(ms / 60000), sec = Math.floor(ms / 1000) % 60, cs = Math.floor(ms / 10) % 100;
   return pad(m, 2) + ':' + pad(sec, 2) + '.' + pad(cs, 2);
 }
-const CFG = { sfx: 2, mus: 2, fx: 0, shake: 1, scan: 1, mute: 0, wgate: 0, shadow: 1, cb: 0 };
-try { Object.assign(CFG, JSON.parse(localStorage.getItem('neonvoid_cfg') || '{}')); } catch (e) {}
-const CFG_RNG = { sfx: 2, mus: 2, fx: 2, shake: 1, scan: 1, mute: 1, wgate: 1, shadow: 1, cb: 1 };
+const CFG = { bgm: 10, se: 10, fx: 0, shake: 2, scan: 1, mute: 0, wgate: 0, shadow: 1, cb: 0, killcam: 1, jdz: 1, jsens: 2 };
+/* [R20-CFG] 存档迁移：v1.5.8 及更早的旧档没有 BGM/SE 双滑条键（bgm/se 缺席即旧代），需把上一代
+   音量字段映射进双滑条；shake 旧代是 0/1 布尔（1=开=全额强度），三档化后 1 变「弱」会把老玩家
+   静默降档 → 旧代 1 映射到「强」(2)。新代档（已有 bgm/se）原样信任，不再改写。 */
+function migrateCfg(raw) {
+  const o = Object.assign({}, raw || {});
+  const legacy = o.bgm == null && o.se == null;
+  if (legacy) {
+    // 音量：旧 sfx/mus 三档（0 关/1 低/2 正常）→ 0-10 线性映射（低≈4）；mute 布尔总开关吸收为双滑条 0
+    if (o.bgm == null) o.bgm = o.mus == null ? 10 : [0, 4, 10][CL(o.mus | 0, 0, 2)];
+    if (o.se == null) o.se = o.sfx == null ? 10 : [0, 4, 10][CL(o.sfx | 0, 0, 2)];
+    if (o.mute === 1 || o.mute === true) { o.bgm = 0; o.se = 0; o.mute = 0; } // 旧档静音 → 双滑条落 0（意图等价迁移，不双重静音）
+    if (o.shake === 1 || o.shake === true) o.shake = 2; // 旧布尔「开」=全额强度 → 新「强」档，行为不变
+    delete o.sfx; delete o.mus;
+  }
+  o.mute = o.mute ? 1 : 0; // mute 已不是设置行（M 键主静音保留），归一成 0/1
+  return o;
+}
+try { Object.assign(CFG, migrateCfg(JSON.parse(localStorage.getItem('neonvoid_cfg') || '{}'))); } catch (e) {}
+const CFG_RNG = { bgm: 10, se: 10, fx: 2, shake: 2, scan: 1, wgate: 1, shadow: 1, cb: 1, killcam: 1, jdz: 2, jsens: 2 };
 for (const ck in CFG_RNG) {
   if (typeof CFG[ck] !== 'number' || CFG[ck] < 0 || CFG[ck] > CFG_RNG[ck] || Math.floor(CFG[ck]) !== CFG[ck]) CFG[ck] = CFG_RNG[ck];
 }
 G.muted = !!CFG.mute;
+/* [FIX-CFG1] 选项序陷阱（保留警示）：CFG_RNG 的值兼任「默认值/合法上限」，二值行序号 1 必须=开，
+   否则缺键回填 1 会显示『关』而布尔真值闸门（采样/入口）当作开——上一版 ['开','关'] 两套语义正好相反。
+   [R20-CFG] 本轮行改造：mute/sfx/mus 三行收编为 bgm/se 双滑条（sl 标记，0-10 档点轨即设）；
+   shake 扩三档 ['关','弱','强']（缺键回填 2=「强」=旧「开」的全额强度，[FIX-CFG2] 序语义不变式保持）；
+   scan 二值行 ['关','开'] 原样不动。killcam/jdz/jsens 均为新增行，回填值=旧行为（killcam 开/jdz 标准/jsens 高）。 */
 const CFGS = [
-  { k: 'mute',  n: '声音总开关', o: ['开', '关'] },
+  { k: 'bgm',   n: '音乐音量 · BGM', sl: 1 },
+  { k: 'se',    n: '音效音量 · SE',  sl: 1 },
   { k: 'wgate', n: '波间暂停', o: ['关', '开'] },
-  { k: 'sfx',   n: '音效音量',  o: ['关', '低', '正常'] },
-  { k: 'mus',   n: '音乐音量',  o: ['关', '低', '正常'] },
   { k: 'fx',    n: '画质',      o: ['自动', '高', '低'] },
-  { k: 'shake', n: '屏幕震动',  o: ['关', '开'] },
+  { k: 'shake', n: '屏幕震动',  o: ['关', '弱', '强'] },
   { k: 'scan',  n: 'CRT 扫描线', o: ['关', '开'] },
-  // [FIX-CFG1] 选项序用 ['关','开']（同「波间暂停」）：CFG_RNG 的值兼任「默认值/合法上限」，序号 1 必须=开，
-  // 否则缺键回填 1 会显示『关』而布尔真值闸门（采样/入口）当作开——上一版 ['开','关'] 两套语义正好相反
-  // [FIX-CFG2] shake/scan 同型陷阱一并修正（缺键回填 1=开，渲染高亮也必须落在『开』上）；
-  // mute 不在此列：它键语义反相（0=不静音），o[0]='开' 恰好正确，保持 ['开','关']
+  { k: 'killcam', n: '结算击杀镜头', o: ['关', '开'] },
   { k: 'shadow', n: '昨日之影', o: ['关', '开'] },
   // [A11Y-CB] 色盲模式：视觉辅助开关，默认关（关闭时绘制路径逐像素不变），开启后见 CBPAL
-  { k: 'cb', n: '色盲模式', o: ['关', '开'] }
+  { k: 'cb', n: '色盲模式', o: ['关', '开'] },
+  // [R20-JOY] 触屏摇杆手感：死区=起手位移阈值（px），灵敏度=越过死区后的加速曲线（高=过死区即全速=旧默认）
+  { k: 'jdz',   n: '摇杆死区',  o: ['小', '标准', '大'] },
+  { k: 'jsens', n: '摇杆灵敏度', o: ['低', '标准', '高'] }
 ];
+const SHAKE_K = [0, 0.5, 1]; // [R20-CFG] 屏幕震动三档强度系数：关 0 / 弱 0.5 / 强 1（强=旧「开」原样）
+const JOY_DZ = [6, 12, 22];  // [R20-JOY] 死区三档起手位移阈值 px（标准 12 = 旧版硬编码值）
 function saveCfg() { try { localStorage.setItem('neonvoid_cfg', JSON.stringify(CFG)); } catch (e) {} }
 const GUIDE = [
   { t: '玩法指南', lines: [
@@ -406,8 +429,9 @@ const GUIDE = [
 ];
 function applyCfg() {
   if (master) master.gain.value = (CFG.mute || G.muted) ? 0 : 1;
-  if (sgain) sgain.gain.value = [0, 0.35, 0.9][CFG.sfx] != null ? [0, 0.35, 0.9][CFG.sfx] : 0.9;
-  if (mgain) mgain.gain.value = [0, 0.18, 0.5][CFG.mus] != null ? [0, 0.18, 0.5][CFG.mus] : 0.5;
+  // [R20-CFG] 双滑条线性增益：SE 满档 0.9（旧「正常」）、BGM 满档 0.5（旧「正常」）；0=全静
+  if (sgain) sgain.gain.value = 0.09 * CFG.se;
+  if (mgain) mgain.gain.value = 0.05 * CFG.bgm;
   // [PERF-L] 手动画质覆盖立即生效（设置页点击即反馈）；自动档由主循环治理器接管
   if (CFG.fx === 1) setTier(0);
   else if (CFG.fx === 2) setTier(2);
@@ -2582,10 +2606,17 @@ function updPlayer(dt) {
   const il = Math.sqrt(ix * ix + iy * iy) || 1;
   ix /= il; iy /= il;
   player.ix = ix; player.iy = iy;
+  let joyF = 1; // [R20-JOY] 摇杆灵敏度输出系数（键盘输入恒 1）
   if (joy.id !== null) {
     const jl = Math.sqrt(joy.dx * joy.dx + joy.dy * joy.dy);
-    if (jl > 12) { ix = joy.dx / jl; iy = joy.dy / jl; }
-    else { ix = 0; iy = 0; }
+    const dz = JOY_DZ[CFG.jdz] || 12; // [R20-JOY] 死区三档：小 6 / 标准 12（旧硬编码值）/ 大 22
+    if (jl > dz) {
+      ix = joy.dx / jl; iy = joy.dy / jl;
+      // [R20-JOY] 灵敏度三档加速曲线（0-1 归一化位移 t）：低=线性推满 60px / 标准=半程即满 /
+      // 高=过死区即全速（=旧版行为，默认档）。方向不变，只缩放速度，上限永不超 msp。
+      const t = CL((jl - dz) / (60 - dz), 0, 1);
+      joyF = CFG.jsens === 0 ? t : CFG.jsens === 1 ? CL(t * 2, 0, 1) : 1;
+    } else { ix = 0; iy = 0; }
     player.ix = ix; player.iy = iy;
   }
   if (player.dashT > 0) {
@@ -2597,8 +2628,8 @@ function updPlayer(dt) {
   } else {
     const msp = 430 * G.spdMul * (G.odT > 0 ? 1.1 : 1);
     const k = 1 - Math.exp(-10 * dt);
-    player.vx = LP(player.vx, ix * msp, k);
-    player.vy = LP(player.vy, iy * msp, k);
+    player.vx = LP(player.vx, ix * msp * joyF, k);
+    player.vy = LP(player.vy, iy * msp * joyF, k);
   }
   player.x = CL(player.x + player.vx * dt, 16, W - 16);
   player.y = CL(player.y + player.vy * dt, 16, H - 16);
@@ -4676,7 +4707,8 @@ function drawReticle() {
   ctx.globalAlpha = 1;
 }
 function drawKillcam() {
-  if (G.state !== 'over' || G.won || G.over > 6) return;
+  // [R20-KC] 设置页「结算击杀镜头」开关（默认开）：关闭时跳过回放层直接呈现结算屏
+  if (!CFG.killcam || G.state !== 'over' || G.won || G.over > 6) return;
   const r = G.rec;
   const n = r.px.length;
   if (n < 4) return;
@@ -4850,7 +4882,7 @@ function drawOverlay() {
       // 选项按钮（titleBtns 的 cfg:*）用同一份几何，标签与按钮永不错位
       CFGS.forEach((r) => {
         const i = CFGS.indexOf(r);
-        txt(r.n, W / 2 - 20, sg.y0 + i * sg.pitch + (sg.crowd ? 7 : sg.compact ? 9 : 13), 12.5, '#dfeeff', 'right', 700);
+        txt(r.n, W / 2 - 20, sg.y0 + i * sg.pitch + (sg.crowd ? 7 : sg.compact ? 8 : 11), 12.5, '#dfeeff', 'right', 700);
       });
     } else if (G.tStage === 'credits') {
       // [FIX-COS6] 矮视口（手机横屏）关于页：页眉上移避开正文首行（正文起点同为 H*0.22）
@@ -4860,7 +4892,7 @@ function drawOverlay() {
       ctx.shadowBlur = 0;
       const cl = [
         ['NEON VOID · 霓虹虚空', 22, '#eaf6ff', 800],
-        ['v1.5.8 · 单文件 · 零依赖 · ~350KB', 12, 'rgba(170,200,235,.8)', 600],
+        ['v1.5.9 · 单文件 · 零依赖 · ~350KB', 12, 'rgba(170,200,235,.8)', 600],
         ['v1.0.2 修复：无尽模式高波次白屏 · 超频射控失效 · 屏幕外残敌卡波', 11, 'rgba(120,230,190,.85)', 600],
         ['v1.0.3 平衡：高波次难度曲线（数量↑ / 血量封顶）· 帧循环微调', 11, 'rgba(120,230,190,.85)', 600],
         ['v1.1.0 扩充：奇点之瞳降临 · 双螺旋/镜面折返弹幕 · 超导闪现/虚空结晶/擦弹领域', 11, 'rgba(120,230,190,.85)', 600],
@@ -4876,6 +4908,7 @@ function drawOverlay() {
         ['v1.5.6 记忆与手感：连胜结算幻影 BOSS/场次多记清零 · 演出窗技能缓冲 · 擦弹成功火花+音调闭环 · 连杀里程碑边缘光晕 · 跨局状态泄漏清零', 11, 'rgba(120,230,190,.85)', 600],
         ['v1.5.7 特效与进程：背景深度动画三档降级 · BOSS 分帧爆散 · 残影数据流 · 扫描线转场 · toast 避让与升级卡排矮横屏收编', 11, 'rgba(120,230,190,.85)', 600],
         ['v1.5.8 记忆闭环：恢复被第 18 轮误回退的 v1.5.6 全部成果（幻影 BOSS 守卫/擦弹火花音调/里程碑光晕/演出窗缓冲/失焦抬手）· 失焦漏 keyup 清键 · 关于页纯触屏入口 · 极矮屏升级卡排让位 toast · BOSS 态 toast 让位 ⏱ · 升级屏成就弹窗/经验条避让卡排', 11, 'rgba(120,230,190,.85)', 600],
+        ['v1.5.9 记忆科学二期：BGM/SE 双滑条（0-10 档 · 旧档 mute/sfx/mus 自动迁移）· 屏幕震动关/弱/强三档 · 结算击杀镜头开关 · 摇杆死区/灵敏度三档 · 胜局结算头延迟入场（横幅叠印清零）· 升级态 toast 三档剖面（844×390/844×320/1280×720）终验通过', 11, 'rgba(120,230,190,.85)', 600],
         ['', 10, '', 400],
         ['设计 · 代码 · 美术 · 音乐', 14, '#dfeeff', 700],
         ['全部由 AI 通过 VIBECODING 创作', 14, '#ff7ad9', 700],
@@ -5053,6 +5086,7 @@ function drawOverlay() {
       // 桌面鼠标悬停时 inside 恒为 true，行为逐像素不变。
       const hov = mouse.inside && mouse.x >= tb.x && mouse.x <= tb.x + tb.w && mouse.y >= tb.y && mouse.y <= tb.y + tb.h;
       ctx.save();
+      if (tb.sl) { drawSliderRow(tb, hov); ctx.restore(); continue; } // [R20-SLIDER] 滑条行自绘轨道/手柄/档位
       if (hov) {
         const mx2 = tb.x + tb.w / 2, my2 = tb.y + tb.h / 2;
         ctx.translate(mx2, my2); ctx.scale(1.05, 1.05); ctx.translate(-mx2, -my2);
@@ -5179,7 +5213,7 @@ function drawOverlay() {
     // 页脚基线在 H-14 直接从按钮下穿过 → 这些自绘子页一律让位不画页脚（各自已有返回按钮/页内提示）
     if (G.tStage !== 'brb' && G.tStage !== 'ach' && G.tStage !== 'set' && G.tStage !== 'guide' &&
         G.tStage !== 'credits' && G.tStage !== 'ghost' && G.tStage !== 'duel' && G.tStage !== 'duelres') {
-      txt('P 暂停 · M 静音 · A 成就 · G 指南 · S 设置 · C 关于 · B 构建器 · NEON VOID v1.5.8', cx, H - 14, 10, 'rgba(140,170,210,.4)', 'center', 500, true);
+      txt('P 暂停 · M 静音 · A 成就 · G 指南 · S 设置 · C 关于 · B 构建器 · NEON VOID v1.5.9', cx, H - 14, 10, 'rgba(140,170,210,.4)', 'center', 500, true);
     }
   } else if (G.state === 'levelup') {
     ctx.fillStyle = 'rgba(3,5,16,.8)';
@@ -5328,14 +5362,25 @@ function drawOverlay() {
     ctx.globalAlpha = fa;
     const g = (G.time * 7) % 1 < 0.15;
     const ox = g ? R(-3, 3) : 0, oy = g ? R(-2, 2) : 0;
+    // [R20-WONHD] 胜局结算头延迟入场：winGame 的胜利横幅（prio2 · d=2.3s · 落点 H*0.3）与结算屏
+    // 同名大标题（H*0.22，44px）+ ★新纪录/⏱最速纪录行（H*0.325.. 带）在头 ~2s 同屏叠印
+    //（844×390 实测标题带 64..108 与横幅带 97..137 相交、★新纪录 129..147 整段压在横幅带上；
+    // 1280×720 同型相交）。横幅存活期间头部整块不画（横幅本身就是同名标题演出），横幅自灭
+    // （updateAmbient 清 G.banner，t≈2.3s）后 0.4s 快速淡入补位；头部各行位（spBottom 链）照常
+    // 参与布局计算只是延后可见——战绩行/评级字母/按钮带不受影响。单场与连胜两路径同律。
+    const whd = !G.won ? 1 : G.banner ? 0 : CL((G.over - 2.3) / 0.4, 0, 1);
     if (G.won) {
       // [ELEG8-OVER] 结算标题统一走 overTitle()（与 winGame 横幅同口径）：旧版 brb/duel 胜利时
       // 落到兜底文案「虚空肃清 / SECTOR CLEARED」，与横幅「全灭达成/对决完成」自相矛盾
-      const ot = overTitle();
-      ctx.shadowColor = G.mode === 'ghost' ? '#8affd4' : COL.gold; ctx.shadowBlur = 26;
-      txt(ot[0], cx + ox, H * 0.22 + oy, 44, G.mode === 'ghost' ? '#8affd4' : COL.gold, 'center', 900);
-      ctx.shadowBlur = 0;
-      txt(ot[1], cx, H * 0.22 + 34, 13, 'rgba(255,210,120,.9)', 'center', 600, true, 4);
+      if (whd > 0) {
+        const ot = overTitle();
+        ctx.shadowColor = G.mode === 'ghost' ? '#8affd4' : COL.gold; ctx.shadowBlur = 26;
+        ctx.globalAlpha = fa * whd;
+        txt(ot[0], cx + ox, H * 0.22 + oy, 44, G.mode === 'ghost' ? '#8affd4' : COL.gold, 'center', 900);
+        ctx.shadowBlur = 0;
+        txt(ot[1], cx, H * 0.22 + 34, 13, 'rgba(255,210,120,.9)', 'center', 600, true, 4);
+        ctx.globalAlpha = fa;
+      }
     } else {
       ctx.shadowColor = G.mode === 'ghost' ? '#ff6688' : '#ff3355'; ctx.shadowBlur = 22;
       txt(G.mode === 'ghost' ? '残影反噬' : '信号丢失', cx + ox, H * 0.22 + oy, 44, G.mode === 'ghost' ? '#ff6688' : '#ff3355', 'center', 900);
@@ -5362,13 +5407,21 @@ function drawOverlay() {
     if (G.newHi) {
       const p = 0.5 + 0.5 * Math.sin(G.time * 4);
       const ny = Math.max(H * 0.325, spY + 18);
-      txt('★ 新纪录 NEW RECORD ★', cx, ny, 17, 'rgba(255,200,60,' + (0.6 + 0.4 * p) + ')', 'center', 800);
+      if (whd > 0) { // [R20-WONHD] 行位照常入链，可见性随头部延迟入场（下方各行同律）
+        ctx.globalAlpha = fa * whd;
+        txt('★ 新纪录 NEW RECORD ★', cx, ny, 17, 'rgba(255,200,60,' + (0.6 + 0.4 * p) + ')', 'center', 800);
+        ctx.globalAlpha = fa;
+      }
       spBottom = ny + 9;
     }
     if (G.newBest) {
       const p2b = 0.5 + 0.5 * Math.sin(G.time * 5);
       const by2 = Math.max(H * 0.352, spBottom + 9);
-      txt('⏱ 最速纪录 NEW BEST TIME ⏱', cx, by2, 14, 'rgba(80,255,170,' + (0.6 + 0.4 * p2b) + ')', 'center', 800, true);
+      if (whd > 0) {
+        ctx.globalAlpha = fa * whd;
+        txt('⏱ 最速纪录 NEW BEST TIME ⏱', cx, by2, 14, 'rgba(80,255,170,' + (0.6 + 0.4 * p2b) + ')', 'center', 800, true);
+        ctx.globalAlpha = fa;
+      }
       spBottom = by2 + 7;
     }
     if (G.mode === 'daily' && G.dailyRank > 0) {
@@ -5527,8 +5580,8 @@ function render() {
   ctx.fillStyle = '#05060f';
   ctx.fillRect(0, 0, W, H);
   drawNebula();
-  const sx = (Math.random() * 2 - 1) * G.shake * CALM * CFG.shake;
-  const sy = (Math.random() * 2 - 1) * G.shake * CALM * CFG.shake;
+  const sx = (Math.random() * 2 - 1) * G.shake * CALM * SHAKE_K[CFG.shake];
+  const sy = (Math.random() * 2 - 1) * G.shake * CALM * SHAKE_K[CFG.shake];
   ctx.save();
   try {
     ctx.translate(sx, sy);
@@ -5696,8 +5749,12 @@ function setGeom() {
   // ③ 行距硬下限 14 与 h 持平（行盒相接不交叠，12.5px 字墨高 ~11px 仍留 ≥3px 空隙）
   const crowd = compact && H < 430;
   const hdrY = crowd ? Math.max(56, H * 0.30) : H * 0.425;
-  const h = crowd ? 14 : compact ? 18 : 26, n = CFGS.length;
-  const pfloor = crowd ? 14 : compact ? 18 : 28;
+  // [R20-CFG] 设置行 9→11（mute/sfx/mus 收编双滑条 + killcam/摇杆两行）：行盒三档同步收薄——
+  // compact 18→16 / 桌面 26→22（行距下限与行高持平的原则不变），crowd 14 已是极限不再动。
+  // 844×320（crowd 11 行）fuse 压到 pitch≈13.1 仍满足「行盒不交叠 + 底边 ≤ H-38」；桌面小窗
+  // （H≈560）同理压 pitch≈21 行距仍不交叠。行高变化只影响行盒视觉高度，字墨 12.5px 仍居中。
+  const h = crowd ? 14 : compact ? 16 : 22, n = CFGS.length;
+  const pfloor = crowd ? 14 : compact ? 16 : 22;
   let y0 = crowd ? hdrY + 36 : compact ? H * 0.425 + 36 : H * 0.47;
   let pitch = crowd ? 20 : compact ? 20 : 40;
   const honTop = H * 0.80 - 12;
@@ -5726,6 +5783,41 @@ function setGeom() {
     if (deficit > 0) y0 = Math.max(hdrY + 30, y0 - deficit - 2);
   }
   return { compact, crowd, hdrY, h, y0, pitch, honFit };
+}
+/* [R20-SLIDER] 音量滑条轨道几何（渲染侧/titleBtns/click 换算三处同源）：轨道从 W/2+10 起，
+   宽度按半屏自适应（844×390 = 230px），11 档（0-10）均分。点击/拖动轨道任意点即设档。 */
+function sliderW() { return Math.max(140, Math.min(230, W / 2 - 50)); }
+function sliderX() { return W / 2 + 10; }
+let slDrag = null; // [R20-SLIDER] 滑条拖动态 { k, id }：pointerdown 命中滑条置位，pointermove 持续换算，up/cancel 清
+function applySlider(k, px) {
+  const r = CFGS.find(x => x.k === k);
+  if (!r || !r.sl || px == null || isNaN(px)) return;
+  const mx = CFG_RNG[k];
+  CFG[k] = CL(Math.round((px - sliderX()) / sliderW() * mx), 0, mx);
+  applyCfg(); saveCfg();
+}
+/* [R20-SLIDER] 滑条行绘制：胶囊轨道 + 填充条 + 圆形手柄 + 右端档位数字。
+   填充/手柄位置 = CFG[k]/CFG_RNG[k] 线性映射；hover 白描边与普通按钮同一语言。 */
+function drawSliderRow(tb, hov) {
+  const mx = CFG_RNG[tb.sl], v = CL(CFG[tb.sl] || 0, 0, mx);
+  ctx.fillStyle = COL.panel;
+  ctx.strokeStyle = hov ? '#ffffff' : '#5a7090';
+  ctx.lineWidth = hov ? 2.5 : 1.5;
+  rr(tb.x, tb.y, tb.w, tb.h, tb.h / 2);
+  ctx.fill(); ctx.stroke();
+  if (v > 0) {
+    ctx.globalAlpha = 0.75;
+    ctx.fillStyle = '#2ee6ff';
+    rr(tb.x + 2, tb.y + 3, Math.max(4, (tb.w - 4) * v / mx), tb.h - 6, (tb.h - 6) / 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+  const kx = tb.x + 6 + (tb.w - 12) * v / mx, ky = tb.y + tb.h / 2;
+  ctx.beginPath(); ctx.arc(kx, ky, tb.h / 2 - 3, 0, TAU);
+  ctx.fillStyle = v > 0 ? '#eaf6ff' : '#5a7090'; ctx.fill();
+  ctx.strokeStyle = '#9fdcff'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.arc(kx, ky, tb.h / 2 - 3, 0, TAU); ctx.stroke();
+  txt(v + '/' + mx, tb.x + tb.w + 10, ky, 11.5, '#9fdcff', 'left', 700, true);
 }
 /* [R15-LAY1] mode/players 页榜块让位（R14 遗留实测复现：720×520 小窗 canvas H≈432，
    压缩后模式卡第 4 行底边 ≈386.6 压住 H*0.80≈345.6 起画的荣誉榜标题与行块）。
@@ -5762,8 +5854,14 @@ function titleBtns() {
       // [FIX-COS8] 与渲染侧共用 setGeom()，矮视口行距压缩后按钮仍与行标签对齐
       const sg = setGeom();
       CFGS.forEach((r) => {
+        const ry = sg.y0 + CFGS.indexOf(r) * sg.pitch;
+        // [R20-SLIDER] 滑条行：整条轨道是一个按钮（cfgs:<k>），值由命中的 x 换算（titleAct px 入参）
+        if (r.sl) {
+          out2.push({ x: sliderX(), y: ry, w: sliderW(), h: Math.max(sg.h, 18), sl: r.k, act: 'cfgs:' + r.k, l: String(CFG[r.k]) });
+          return;
+        }
         r.o.forEach((on, oi) => {
-          out2.push({ x: W / 2 + 10 + oi * 68, y: sg.y0 + CFGS.indexOf(r) * sg.pitch, w: 62, h: sg.h,
+          out2.push({ x: W / 2 + 10 + oi * 68, y: ry, w: 62, h: sg.h,
             act: 'cfg:' + r.k + ':' + oi, l: on, c: CFG[r.k] === oi ? '#ffc233' : '#5a7090', f: sg.compact ? 11 : undefined });
         });
       });
@@ -5907,7 +6005,7 @@ function titleBtns() {
   }
   return pbtns;
 }
-function titleAct(a) {
+function titleAct(a, px, py) {
   if (!a) return;
   if (a === 'back') {
     if (G.tStage === 'ghost') { dismissGhost(); uiClick(); return; }
@@ -5998,8 +6096,14 @@ function titleAct(a) {
   if (a.slice(0, 4) === 'cfg:') {
     const p = a.split(':');
     CFG[p[1]] = +p[2];
-    if (p[1] === 'mute') G.muted = +p[2] === 1;
     applyCfg(); saveCfg(); uiClick();
+    return;
+  }
+  if (a.slice(0, 5) === 'cfgs:') {
+    // [R20-SLIDER] 滑条行：命中 x → 0..10 档线性换算（轨道三处同源 sliderX/sliderW）；拖动时 pointermove
+    // 持续调 applySlider，抬手清 slDrag。无坐标的调用（理论上不存在）保持原值不误触。
+    applySlider(a.slice(5), px);
+    uiClick();
     return;
   }
   if (a.slice(0, 5) === 'mode:') { G.tSel = a.slice(5); G.tStage = 'players'; uiClick(); return; }
@@ -6190,16 +6294,21 @@ cv.addEventListener('pointermove', (e) => {
       joy.dx = CL(px - joy.sx, -60, 60);
       joy.dy = CL(py - joy.sy, -60, 60);
     }
+    if (slDrag && slDrag.id === e.pointerId) { applySlider(slDrag.k, px); return; } // [R20-SLIDER] 滑条拖动跟手
     return;
   }
   mouse.x = px; mouse.y = py; mouse.inside = true;
+  if (slDrag && slDrag.id === e.pointerId) { applySlider(slDrag.k, px); } // [R20-SLIDER] 鼠标拖动跟手
   // [R14-HOV] 混合设备回归：触屏一次会把 touchMode 永久锁在触屏 UI（摇杆/近敌瞄准/无准星），
   // 之后真鼠标移动/点按再也无法唤回鼠标形态 → 真实鼠标指针事件（pointerType=mouse，触屏不合成）
   // 到达即还原；触屏事件仍是 touch 类型，不受影响
   if (G.touchMode) G.touchMode = false;
   G.lastMouse = G.time;
 });
-function endJoy(e) { if (joy.id === e.pointerId) { joy.id = null; joy.dx = 0; joy.dy = 0; } }
+function endJoy(e) {
+  if (joy.id === e.pointerId) { joy.id = null; joy.dx = 0; joy.dy = 0; }
+  if (slDrag && slDrag.id === e.pointerId) slDrag = null; // [R20-SLIDER] 抬手结束滑条拖动
+}
 cv.addEventListener('pointerup', endJoy);
 cv.addEventListener('pointercancel', endJoy);
 cv.addEventListener('pointerleave', () => { mouse.inside = false; });
@@ -6214,7 +6323,8 @@ cv.addEventListener('pointerdown', (e) => {
     if (G.state === 'title') {
       // [A11Y-T44] 触屏命中走 44px 外扩矩形（pickTouchBtn 重叠时取最近按钮）
       const tb = pickTouchBtn(titleBtns(), px, py);
-      titleAct(tb ? tb.act : null);
+      if (tb && tb.act.indexOf('cfgs:') === 0) slDrag = { k: tb.act.slice(5), id: e.pointerId }; // [R20-SLIDER]
+      titleAct(tb ? tb.act : null, px, py);
       return;
     }
     if (G.state === 'wgate') {
@@ -6279,7 +6389,8 @@ cv.addEventListener('pointerdown', (e) => {
     for (const tb of titleBtns()) {
       if (px >= tb.x && px <= tb.x + tb.w && py >= tb.y && py <= tb.y + tb.h) act = tb.act;
     }
-    titleAct(act);
+    if (act && act.indexOf('cfgs:') === 0) slDrag = { k: act.slice(5), id: e.pointerId }; // [R20-SLIDER]
+    titleAct(act, px, py);
     return;
   }
   if (G.state === 'over') {
@@ -6543,7 +6654,9 @@ window.NV_SNAP = () => ({
   tStage: G.tStage,
   sgeom: G.tStage === 'set' ? setGeom() : null,
   // [A11Y-CB] 色盲模式断言面：cfg 值 + 弹幕样本（bd=BOSS 标记 / bo=反弹 / sh=色盲绘制形状 0圆·4菱·3三角 / c=原始色）+ 拾取物样本
-  cfgCb: CFG.cb, rerolls: G.rerolls,
+  // [R20-CFG] cfg=全量设置快照（双滑条/三档/开关实机断言面，只读副本）；banner=在场横幅（胜局结算头延迟入场断言面）
+  cfgCb: CFG.cb, cfg: Object.assign({}, CFG), rerolls: G.rerolls,
+  banner: G.banner ? { m: G.banner.m, t: Math.round(G.banner.t * 100) / 100, d: G.banner.d, prio: G.banner.prio } : null,
   ebN: ebullets.length,
   ebS: ebullets.slice(-24).map(b => [b.bd || 0, b.bo || 0, Math.round(b.x), Math.round(b.y), Math.round(b.r * 10) / 10, b.bd ? (b.bo ? 3 : 4) : 0, b.c]),
   picks: pickups.slice(0, 12).map(p => [p.k, Math.round(p.x), Math.round(p.y)]),

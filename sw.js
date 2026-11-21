@@ -2,7 +2,7 @@
    单文件游戏的离线缓存：stale-while-revalidate，hash 参数不影响命中（# 不发往网络）
    [FIX-SW1] 每次发版必须递增 CACHE 版本号：activate 清掉旧缓存，已打开的旧标签页
    下一次请求即换新版本，避免修复后的代码被旧缓存持续顶住（白屏旧案复发通道） */
-const CACHE = 'neon-void-v18'; // v1.5.8 记忆闭环：恢复被误回退的 v1.5.6 成果（幻影 BOSS 守卫/擦弹火花音调/里程碑光晕/演出窗缓冲/失焦清键）（发版必递增）
+const CACHE = 'neon-void-v19'; // v1.5.9 记忆科学二期：BGM/SE 双滑条+旧档迁移 · 震动三档 · 击杀镜头开关 · 摇杆死区/灵敏度 · 胜局结算头延迟入场（发版必递增）
 const CORE = ['./', './index.html'];
 
 self.addEventListener('install', (e) => {
